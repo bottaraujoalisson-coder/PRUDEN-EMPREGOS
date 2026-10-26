@@ -1,0 +1,6 @@
+{
+  "name": "PrudenEmpregos",
+  "description": "Plataforma profissional de empregabilidade e conexões de talentos para Presidente Prudente - SP.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

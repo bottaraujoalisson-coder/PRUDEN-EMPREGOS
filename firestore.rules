@@ -1,0 +1,172 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        ('email' in request.auth.token && request.auth.token.email.lower() == 'bottaraujoalisson@gmail.com')
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // TEST CONNECTION PING
+    match /test/{docId} {
+      allow read: if true;
+    }
+
+    // USERS COLLECTION
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin() || (isSignedIn() && resource.data.type == 'company') || resource.data.type == 'company';
+      allow list: if isAdmin();
+      
+      allow create: if isSignedIn() 
+        && request.auth.uid == userId
+        && (!('uid' in incoming()) || incoming().uid == request.auth.uid)
+        && (isAdmin() || incoming().type in ['candidate', 'company']);
+        
+      allow update: if (isOwner(userId) || isAdmin())
+        && (!('uid' in incoming()) || incoming().uid == userId);
+        
+      allow delete: if isAdmin();
+    }
+
+    // DOCUMENT REGISTRY COLLECTION (CPF / CNPJ UNIQUENESS)
+    match /document_registry/{docId} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create: if isSignedIn()
+        && isValidId(docId)
+        && incoming().uid == request.auth.uid
+        && incoming().documentType in ['CPF', 'CNPJ'];
+      allow update: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isAdmin())
+        && incoming().uid == resource.data.uid;
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+    }
+
+    // GENERATED RESUMES COLLECTION
+    match /generated_resumes/{resumeId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn()
+        && isValidId(resumeId)
+        && incoming().userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    // JOBS COLLECTION
+    match /jobs/{jobId} {
+      allow get: if true;
+      allow list: if true;
+      
+      allow create: if isSignedIn()
+        && isValidId(jobId)
+        && incoming().companyId == request.auth.uid
+        && incoming().title is string && incoming().title.size() <= 150
+        && (isAdmin() || incoming().status in ['active', 'paused']);
+
+      allow update: if isSignedIn() 
+        && (resource.data.companyId == request.auth.uid || isAdmin());
+
+      allow delete: if isSignedIn() 
+        && (resource.data.companyId == request.auth.uid || isAdmin());
+    }
+
+    // APPLICATIONS COLLECTION
+    match /applications/{applicationId} {
+      allow get: if isSignedIn() && (
+        resource.data.candidateId == request.auth.uid || 
+        resource.data.companyId == request.auth.uid || 
+        isAdmin()
+      );
+      
+      allow list: if isSignedIn() && (
+        resource.data.candidateId == request.auth.uid || 
+        resource.data.companyId == request.auth.uid || 
+        isAdmin()
+      );
+
+      allow create: if isSignedIn()
+        && isValidId(applicationId)
+        && incoming().candidateId == request.auth.uid
+        && incoming().status == 'Enviado';
+
+      allow update: if isSignedIn() && (
+        resource.data.companyId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow delete: if isSignedIn() && (
+        resource.data.candidateId == request.auth.uid ||
+        isAdmin()
+      );
+    }
+
+    // REPORTS COLLECTION
+    match /reports/{reportId} {
+      allow get, list: if isAdmin();
+      
+      allow create: if isSignedIn()
+        && isValidId(reportId)
+        && incoming().reporterId == request.auth.uid;
+        
+      allow update, delete: if isAdmin();
+    }
+
+    // ADMINS COLLECTION
+    match /admins/{adminId} {
+      allow read: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow write: if isAdmin() || (isSignedIn() && ('email' in request.auth.token) && request.auth.token.email.lower() == 'bottaraujoalisson@gmail.com');
+    }
+
+    // CREDIT ORDERS COLLECTION
+    match /credit_orders/{orderId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn()
+        && isValidId(orderId)
+        && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (resource.data.userId == request.auth.uid && incoming().userId == existing().userId) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // CREDIT TRANSACTIONS COLLECTION
+    match /credit_transactions/{txId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn()
+        && isValidId(txId)
+        && incoming().userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+  }
+}
