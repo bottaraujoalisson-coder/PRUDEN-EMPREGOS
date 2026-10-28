@@ -22,6 +22,8 @@ import {
   normalizeCEP,
   isValidCEP,
   validateCandidateProfileUpdate,
+  validateSafeUploadDataUrl,
+  sanitizeText,
 } from '../utils/validation';
 import { lookupAddressByCep } from '../services/cepService';
 import {
@@ -51,7 +53,6 @@ import {
   Loader2,
   AlertCircle,
   Camera,
-  ShieldCheck,
   Check,
 } from 'lucide-react';
 
@@ -176,7 +177,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
       showToast('Selecione uma imagem válida (JPG, PNG ou WebP).', 'error');
       return;
     }
@@ -188,6 +189,15 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
+      const check = validateSafeUploadDataUrl(
+        result,
+        ['image/jpeg', 'image/png', 'image/webp'],
+        2 * 1024 * 1024
+      );
+      if (!check.valid) {
+        showToast(check.error || 'Arquivo de imagem inválido ou corrompido.', 'error');
+        return;
+      }
       setPhotoDataUrl(result);
       showToast('Foto de perfil atualizada! Salve seu currículo para confirmar.');
     };
@@ -352,11 +362,17 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
+      const check = validateSafeUploadDataUrl(result, ['application/pdf'], 800 * 1024);
+      if (!check.valid) {
+        showToast(check.error || 'O arquivo enviado não é um documento PDF autêntico.', 'error');
+        return;
+      }
+      const safeFileName = sanitizeText(file.name, 120).replace(/[^a-zA-Z0-9._\-\s()]/g, '_');
       setResumeFile({
-        name: file.name,
+        name: safeFileName || 'curriculo.pdf',
         dataUrl: result,
       });
-      showToast(`Currículo "${file.name}" carregado. Clique em "Salvar currículo" para confirmar.`);
+      showToast(`Currículo "${safeFileName}" carregado. Clique em "Salvar currículo" para confirmar.`);
     };
     reader.onerror = () => {
       showToast('Erro ao ler arquivo PDF.', 'error');
@@ -614,9 +630,9 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
   const wizardProgressPercent = wizardStep * 25;
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] pb-16">
-      {/* Centered Candidate Header */}
-      <div className="bg-[#0B1F3A] text-white border-b border-[#1E3A8A]/60 py-6">
+    <div className="min-h-screen bg-[#F4F7FE] pb-16">
+      {/* Centered Blue Candidate Header */}
+      <div className="bg-gradient-to-b from-[#1E40AF] to-[#2563EB] text-white border-b border-[#1D4ED8] py-6">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
           <div className="flex flex-col sm:flex-row items-center gap-3.5 min-w-0">
             <div className="relative shrink-0">
@@ -624,17 +640,17 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                 <img
                   src={photoDataUrl}
                   alt={user.name}
-                  className="w-14 h-14 rounded-full object-cover border-2 border-white/25 bg-slate-800"
+                  className="w-14 h-14 rounded-full object-cover border-2 border-white/30 bg-[#1E3A8A]"
                 />
               ) : (
-                <div className="w-14 h-14 rounded-full bg-[#1E3A8A] border-2 border-white/20 text-white font-bold text-lg flex items-center justify-center">
+                <div className="w-14 h-14 rounded-full bg-white/15 border-2 border-white/25 text-white font-bold text-lg flex items-center justify-center">
                   {(user.name || 'C').charAt(0).toUpperCase()}
                 </div>
               )}
               <label
                 htmlFor="cand-header-photo-upload"
                 title="Alterar foto de perfil"
-                className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-[#2457D6] hover:bg-blue-500 text-white flex items-center justify-center border border-white/40 cursor-pointer"
+                className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-white text-[#1E40AF] hover:bg-blue-50 flex items-center justify-center border border-[#93C5FD] cursor-pointer shadow-xs"
               >
                 <Camera className="w-3 h-3" />
                 <input
@@ -651,14 +667,14 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
               <h1 className="text-[20px] sm:text-[24px] font-bold text-white truncate">
                 {user.name}
               </h1>
-              <p className="text-[13px] text-slate-300 mt-0.5 truncate">
+              <p className="text-[13px] text-blue-100 mt-0.5 truncate">
                 {headerSubtitle}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
-            <div className="inline-flex items-center gap-2 bg-white/10 border border-white/15 px-3.5 py-2 rounded-lg">
+            <div className="inline-flex items-center gap-2 bg-white/15 border border-white/25 px-3.5 py-2 rounded-lg">
               <Coins className="w-4 h-4 text-amber-300 shrink-0" />
               <span
                 data-testid="candidate-header-credits"
@@ -671,7 +687,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                   type="button"
                   onClick={() => onSelectCreditPackage(CANDIDATE_RESUME_CREDIT_PACKAGE)}
                   data-testid="candidate-add-credits-btn"
-                  className="ml-1 px-2.5 py-1 rounded-md bg-white/15 hover:bg-white/25 text-white text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap"
+                  className="ml-1 px-2.5 py-1 rounded-md bg-white text-[#1E40AF] hover:bg-blue-50 text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap"
                 >
                   + Recarregar
                 </button>
@@ -682,12 +698,12 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       </div>
 
       {/* Centered Sub-Navigation Bar */}
-      <div className="bg-white border-b border-[#E2E8F0] mb-8">
+      <div className="bg-white border-b border-[#DBEAFE] mb-8">
         <div className="max-w-3xl mx-auto px-4 sm:px-6">
           <div
             role="tablist"
             aria-label="Navegação do painel do candidato"
-            className="grid grid-cols-3 sm:flex sm:items-center sm:justify-center sm:gap-10"
+            className="flex items-center justify-between sm:justify-center gap-2 sm:gap-10"
           >
             <button
               type="button"
@@ -1534,12 +1550,12 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                 </div>
 
                 {/* Gerador de Currículo ATS */}
-                <div className="p-5 rounded-xl bg-[#0B1F3A] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="p-5 rounded-xl bg-gradient-to-r from-[#1E40AF] to-[#2563EB] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="space-y-1">
                     <h4 className="text-[15px] font-bold text-white">
                       Gerar Currículo em PDF Padrão ATS
                     </h4>
-                    <p className="text-[13px] text-slate-300 leading-relaxed max-w-md">
+                    <p className="text-[13px] text-blue-100 leading-relaxed max-w-md">
                       Escolha entre 3 modelos profissionais otimizados para recrutadores ({RESUME_GENERATION_COST} créditos).
                     </p>
                   </div>
@@ -1548,21 +1564,21 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                     type="button"
                     data-testid="open-resume-generator-btn"
                     onClick={handleOpenResumeGeneratorClick}
-                    className="px-4 py-2.5 rounded-lg bg-white hover:bg-slate-100 text-[#0B1F3A] font-bold text-[13px] transition-colors inline-flex items-center justify-center gap-2 cursor-pointer shrink-0 whitespace-nowrap"
+                    className="px-4 py-2.5 rounded-lg bg-white hover:bg-blue-50 text-[#1E40AF] font-bold text-[13px] transition-colors inline-flex items-center justify-center gap-2 cursor-pointer shrink-0 whitespace-nowrap"
                   >
-                    <FileText className="w-4 h-4 text-[#2457D6]" />
+                    <FileText className="w-4 h-4 text-[#2563EB]" />
                     <span>Gerar PDF ATS ({RESUME_GENERATION_COST} créditos)</span>
                   </button>
                 </div>
 
                 {/* Anexo de PDF próprio */}
                 {resumeFile ? (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-[#ECFDF5] border border-[#16835D]/20 rounded-lg">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-[#EFF6FF] border border-[#BFDBFE] rounded-lg">
                     <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-[#16835D] truncate">
+                      <p className="text-[13px] font-semibold text-[#1E40AF] truncate">
                         {resumeFile.name}
                       </p>
-                      <p className="text-[12px] text-[#334155]">
+                      <p className="text-[12px] text-[#475569]">
                         PDF anexado ao seu perfil
                       </p>
                     </div>
@@ -1584,8 +1600,8 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border border-dashed border-[#CBD5E1] rounded-lg bg-[#F8FAFC]">
-                    <span className="text-[13px] text-[#64748B]">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border border-dashed border-[#93C5FD] rounded-lg bg-[#F8FAFF]">
+                    <span className="text-[13px] text-[#475569]">
                       Já possui um currículo em PDF? Anexe gratuitamente:
                     </span>
                     <label
@@ -1607,13 +1623,8 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
             )}
 
             {/* Wizard Navigation Footer */}
-            <div className="bg-white border border-[#E2E8F0] rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs text-[#64748B]">
-                <ShieldCheck className="w-4 h-4 text-[#16835D] shrink-0" />
-                <span>Dados protegidos e visíveis apenas às empresas das vagas que você escolher.</span>
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 shrink-0">
+            <div className="bg-white border border-[#DBEAFE] rounded-xl p-4 flex items-center justify-between gap-3">
+              <div>
                 {wizardStep > 1 && (
                   <button
                     type="button"
@@ -1624,7 +1635,9 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                     <span>Voltar</span>
                   </button>
                 )}
+              </div>
 
+              <div className="flex items-center justify-end gap-2.5 shrink-0">
                 {wizardStep < 4 ? (
                   <button
                     type="button"
@@ -1640,7 +1653,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                     type="submit"
                     disabled={saving}
                     data-testid="candidate-save-profile-btn"
-                    className="py-2.5 px-5 rounded-lg bg-[#16835D] hover:bg-[#116949] text-white text-sm font-bold transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                    className="btn-base btn-md btn-primary font-bold"
                   >
                     {saving ? 'Salvando...' : 'Salvar Currículo'}
                   </button>

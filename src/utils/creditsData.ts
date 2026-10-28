@@ -1,13 +1,17 @@
 import { formatPriceBRL } from './plansData';
 
+export const INITIAL_WELCOME_CREDITS = 30;
+export const INITIAL_FREE_CREDITS = INITIAL_WELCOME_CREDITS;
 export const APPLY_JOB_CREDIT_COST = 10;
 export const POST_JOB_CREDIT_COST = 10;
 export const BOOST_JOB_CREDIT_COST = 15;
 export const RESUME_GENERATION_CREDIT_COST = 15;
+export const RESUME_PDF_CREDIT_COST = RESUME_GENERATION_CREDIT_COST;
 
 export interface CreditPackage {
   id: string;
   title: string;
+  subtitle?: string;
   credits: number;
   bonusCredits: number;
   totalCredits: number;
@@ -28,6 +32,8 @@ export const HERO_VALUE_PROPOSITION = {
     'Não perca bons profissionais pela demora na contratação. Chame candidatos direto no WhatsApp, destaque suas vagas no topo do mural e contrate mais rápido com liberação imediata via Pix.',
   transparencyPill:
     'Como funciona: Publicar Vaga (10 cr) • Destacar Vaga (15 cr) • Candidatar-se (10 cr) • Gerar Currículo ATS (15 cr) • Créditos nunca expiram',
+  welcomeBonusPill:
+    'Novo cadastro: ganhe 30 créditos gratuitos para usar pela 1ª vez sem nenhum custo',
 };
 
 export const CREDIT_TRUST_BAR_ITEMS = [

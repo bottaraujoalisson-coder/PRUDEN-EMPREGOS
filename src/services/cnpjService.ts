@@ -52,57 +52,125 @@ export async function lookupCompanyByCnpj(rawCnpj: string): Promise<CnpjLookupRe
 
   try {
     const res = await fetch(`/api/cnpj/${clean}`);
-    const body = await res.json().catch(() => null);
+    const contentType = res.headers.get('content-type') || '';
+    const body = contentType.includes('application/json')
+      ? await res.json().catch(() => null)
+      : null;
 
-    if (!res.ok) {
-      const failResult: CnpjLookupResult = {
-        success: false,
-        active: false,
-        data: body || undefined,
-        error:
-          body?.error ||
-          'Não foi possível validar o CNPJ na base da Receita Federal.',
-        errorCode: body?.errorCode || 'CNPJ_NOT_FOUND',
-      };
-      if (res.status === 422 || res.status === 404) {
-        clientCnpjCache.set(clean, failResult);
+    if (body && body.cnpj) {
+      if (!res.ok) {
+        const failResult: CnpjLookupResult = {
+          success: false,
+          active: false,
+          data: body || undefined,
+          error:
+            body?.error ||
+            'Não foi possível validar o CNPJ na base da Receita Federal.',
+          errorCode: body?.errorCode || 'CNPJ_NOT_FOUND',
+        };
+        if (res.status === 422 || res.status === 404) {
+          clientCnpjCache.set(clean, failResult);
+        }
+        return failResult;
       }
-      return failResult;
+
+      const formattedCity = body.cityFormatted || 'Presidente Prudente, SP';
+      const data: CnpjReceitaFederalData = {
+        valid: true,
+        active: Boolean(body.active),
+        cnpj: clean,
+        razaoSocial: body.razaoSocial || '',
+        nomeFantasia: body.nomeFantasia || body.razaoSocial || '',
+        situacaoCadastral: body.situacaoCadastral || 'ATIVA',
+        municipio: body.municipio || 'Presidente Prudente',
+        uf: body.uf || 'SP',
+        cityFormatted: formattedCity,
+        cityState: formattedCity,
+        cep: body.cep || '',
+        logradouro: body.logradouro || '',
+        numero: body.numero || '',
+        bairro: body.bairro || '',
+        source: body.source || 'receita_federal',
+      };
+
+      const okResult: CnpjLookupResult = {
+        success: data.active,
+        active: data.active,
+        data,
+        ...(data.active
+          ? {}
+          : {
+              error: `Cadastro bloqueado: CNPJ com situação "${data.situacaoCadastral}" na Receita Federal.`,
+              errorCode: 'CNPJ_INACTIVE',
+            }),
+      };
+
+      clientCnpjCache.set(clean, okResult);
+      return okResult;
     }
 
-    const formattedCity = body.cityFormatted || 'Presidente Prudente, SP';
-    const data: CnpjReceitaFederalData = {
-      valid: true,
-      active: Boolean(body.active),
-      cnpj: clean,
-      razaoSocial: body.razaoSocial || '',
-      nomeFantasia: body.nomeFantasia || body.razaoSocial || '',
-      situacaoCadastral: body.situacaoCadastral || 'ATIVA',
-      municipio: body.municipio || 'Presidente Prudente',
-      uf: body.uf || 'SP',
-      cityFormatted: formattedCity,
-      cityState: formattedCity,
-      cep: body.cep || '',
-      logradouro: body.logradouro || '',
-      numero: body.numero || '',
-      bairro: body.bairro || '',
-      source: body.source || 'receita_federal',
-    };
+    // Fallback direto para BrasilAPI quando hospedado em CDN estática (ex: Netlify)
+    const brasilRes = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${clean}`);
+    if (brasilRes.ok) {
+      const bData: any = await brasilRes.json();
+      const situacaoStr = String(bData.descricao_situacao_cadastral || 'ATIVA').toUpperCase();
+      const situacaoCod = Number(bData.situacao_cadastral ?? 2);
+      const isActive = situacaoStr === 'ATIVA' || situacaoCod === 2;
+      const rawMun = String(bData.municipio || 'Presidente Prudente').trim();
+      const formattedMun = rawMun
+        .toLowerCase()
+        .replace(/(?:^|\s)\S/g, (a) => a.toUpperCase());
+      const uf = String(bData.uf || 'SP').toUpperCase();
+      const cityFormatted = `${formattedMun}, ${uf}`;
 
-    const okResult: CnpjLookupResult = {
-      success: data.active,
-      active: data.active,
-      data,
-      ...(data.active
-        ? {}
-        : {
-            error: `Cadastro bloqueado: CNPJ com situação "${data.situacaoCadastral}" na Receita Federal.`,
-            errorCode: 'CNPJ_INACTIVE',
-          }),
-    };
+      const data: CnpjReceitaFederalData = {
+        valid: true,
+        active: isActive,
+        cnpj: clean,
+        razaoSocial: bData.razao_social || '',
+        nomeFantasia: bData.nome_fantasia || bData.razao_social || '',
+        situacaoCadastral: situacaoStr,
+        municipio: formattedMun,
+        uf,
+        cityFormatted,
+        cityState: cityFormatted,
+        cep: bData.cep ? String(bData.cep) : '',
+        logradouro: bData.logradouro || '',
+        numero: bData.numero || '',
+        bairro: bData.bairro || '',
+        source: 'brasilapi_direct',
+      };
 
-    clientCnpjCache.set(clean, okResult);
-    return okResult;
+      const directResult: CnpjLookupResult = {
+        success: isActive,
+        active: isActive,
+        data,
+        ...(isActive
+          ? {}
+          : {
+              error: `Cadastro bloqueado: CNPJ com situação "${situacaoStr}" na Receita Federal.`,
+              errorCode: 'CNPJ_INACTIVE',
+            }),
+      };
+      clientCnpjCache.set(clean, directResult);
+      return directResult;
+    }
+
+    if (brasilRes.status === 404) {
+      return {
+        success: false,
+        active: false,
+        error: 'CNPJ não encontrado na base de dados da Receita Federal.',
+        errorCode: 'CNPJ_NOT_FOUND',
+      };
+    }
+
+    return {
+      success: false,
+      active: false,
+      error: 'Não foi possível validar o CNPJ na Receita Federal no momento.',
+      errorCode: 'SERVICE_UNAVAILABLE',
+    };
   } catch {
     return {
       success: false,

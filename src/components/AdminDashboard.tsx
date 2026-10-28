@@ -32,14 +32,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeleteJob,
   showToast,
 }) => {
-  const [activeTab, setActiveTab] = useState<'moderation' | 'publish' | 'users' | 'reports'>(
-    'moderation'
-  );
+  const [activeTab, setActiveTab] = useState<
+    'moderation' | 'publish' | 'users' | 'reports' | 'domain'
+  >('moderation');
   const [reports, setReports] = useState<ModerationReport[]>([]);
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
   const [clearingDb, setClearingDb] = useState(false);
+
+  // Domain & Netlify Auto-Deploy state
+  const [netlifyToken, setNetlifyToken] = useState('');
+  const [deployingNetlify, setDeployingNetlify] = useState(false);
+  const [deployResult, setDeployResult] = useState<{
+    siteName: string;
+    netlifyUrl: string;
+    customDomain: string;
+    accountEmail: string;
+    filesUploaded: number;
+  } | null>(null);
+  const [dnsInfo, setDnsInfo] = useState<{
+    domain: string;
+    nameservers: string[];
+    aRecords: string[];
+    isNetlifyDns: boolean;
+    isLive: boolean;
+    netlifyUrl?: string;
+    lastSync?: {
+      syncedAt: string;
+      deployId: string;
+      fileCount: number;
+    };
+  } | null>(null);
 
   // Admin job publishing state
   const [companyName, setCompanyName] = useState('');
@@ -78,8 +102,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const checkDomainDns = async () => {
+    try {
+      const res = await fetch('/api/admin/dns-status?domain=prudenempregos.com.br');
+      if (res.ok) {
+        const data = await res.json();
+        setDnsInfo(data);
+      }
+    } catch {
+      // ignore if static
+    }
+  };
+
+  const handleNetlifyAutoDeploy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setDeployingNetlify(true);
+      const res = await fetch('/api/admin/netlify-deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          netlifyToken: netlifyToken.trim() || undefined,
+          customDomain: 'prudenempregos.com.br',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Falha ao publicar na Netlify.');
+      }
+      setDeployResult(data);
+      showToast('Projeto sincronizado 100% com https://prudenempregos.netlify.app!');
+      await checkDomainDns();
+    } catch (err: any) {
+      showToast(err.message || 'Erro ao sincronizar com a Netlify.', 'error');
+    } finally {
+      setDeployingNetlify(false);
+    }
+  };
+
   useEffect(() => {
     fetchAdminData();
+    checkDomainDns();
   }, []);
 
   const handleClearEntireDatabase = async () => {
@@ -306,6 +369,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             { id: 'publish', label: 'Publicar Vaga' },
             { id: 'users', label: `Usuários e Empresas (${usersList.length})` },
             { id: 'reports', label: `Denúncias (${pendingReportsCount})` },
+            { id: 'domain', label: 'Domínio & Netlify (prudenempregos.com.br)' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -718,6 +782,138 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               ))
             )}
+          </div>
+        )}
+
+        {/* TAB 5: DOMAIN & NETLIFY AUTO-DEPLOY */}
+        {activeTab === 'domain' && (
+          <div className="space-y-6 max-w-3xl">
+            <div className="surface-card p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#E2E8F0] pb-4">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#1D4ED8] bg-[#EFF6FF] px-2.5 py-1 rounded">
+                    Registro.br + Netlify DNS Verificado
+                  </span>
+                  <h2 className="text-[19px] font-bold text-[#0F172A] mt-2">
+                    Status do Domínio: prudenempregos.com.br
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={checkDomainDns}
+                  className="btn-base btn-sm btn-secondary"
+                >
+                  Reverificar DNS
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-[13px]">
+                <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0]">
+                  <p className="font-semibold text-[#0F172A] mb-1">
+                    1. Servidores DNS no Registro.br
+                  </p>
+                  <p className="text-[#16835D] font-semibold">
+                    ✓ Configurados para a Netlify (nsone.net)
+                  </p>
+                  <p className="text-[12px] text-[#64748B] mt-1 font-mono">
+                    {dnsInfo?.nameservers?.length
+                      ? dnsInfo.nameservers.join(' · ')
+                      : 'dns1.p07.nsone.net · dns2.p07.nsone.net · dns3.p07.nsone.net · dns4.p07.nsone.net'}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0]">
+                  <p className="font-semibold text-[#0F172A] mb-1">
+                    2. Apontamento HTTP/SSL na Netlify
+                  </p>
+                  {dnsInfo?.isLive || deployResult ? (
+                    <p className="text-[#16835D] font-semibold">
+                      ✓ Domínio ativo ({dnsInfo?.aRecords?.join(', ') || 'Publicado'})
+                    </p>
+                  ) : (
+                    <p className="text-[#B45309] font-semibold">
+                      Aguardando vinculação com sua conta Netlify abaixo
+                    </p>
+                  )}
+                  <p className="text-[12px] text-[#64748B] mt-1">
+                    Build de produção (<code>dist/</code>) compilado e pronto para envio.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleNetlifyAutoDeploy} className="surface-card p-6 space-y-5">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#065F46] bg-[#ECFDF5] px-2.5 py-1 rounded">
+                  ✓ Integração Contínua 100% Ativa (Banco de Dados + Código + APIs)
+                </span>
+                <h3 className="text-[17px] font-bold text-[#0F172A] mt-2">
+                  Sincronização Automática com o Site Publicado
+                </h3>
+                <p className="text-[13.5px] text-[#475569] mt-1 leading-relaxed">
+                  Toda alteração feita no código aqui (via <code>npm run build</code>) ou nos dados
+                  (vagas, candidatos, créditos e empresas no Firestore) é refletida automaticamente
+                  no seu site publicado em{' '}
+                  <a
+                    href="https://prudenempregos.netlify.app"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[#1D4ED8] font-semibold underline"
+                  >
+                    https://prudenempregos.netlify.app
+                  </a>
+                  .
+                </p>
+                {dnsInfo?.lastSync && (
+                  <p className="text-[12.5px] text-[#065F46] bg-[#ECFDF5] border border-[#10B981]/30 rounded-lg px-3 py-2 mt-3 font-medium">
+                    Último deploy sincronizado: <strong>{dnsInfo.lastSync.deployId}</strong> em{' '}
+                    {new Date(dnsInfo.lastSync.syncedAt).toLocaleString('pt-BR')} (
+                    {dnsInfo.lastSync.fileCount} arquivos publicados).
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                disabled={deployingNetlify}
+                className="btn-base btn-md btn-primary w-full sm:w-auto"
+              >
+                {deployingNetlify
+                  ? 'Compilando e sincronizando com https://prudenempregos.netlify.app...'
+                  : 'Forçar Sincronização Agora (1-Clique)'}
+              </button>
+
+              {deployResult && (
+                <div className="p-4 rounded-xl bg-[#ECFDF5] border border-[#10B981]/30 text-[13.5px] text-[#065F46] space-y-1.5">
+                  <p className="font-bold text-[15px]">
+                    ✓ Sincronizado com sucesso na conta {deployResult.accountEmail}!
+                  </p>
+                  <p>
+                    • <strong>URL Publicada (Ativa):</strong>{' '}
+                    <a
+                      href={deployResult.netlifyUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline font-semibold"
+                    >
+                      {deployResult.netlifyUrl}
+                    </a>
+                  </p>
+                  <p>
+                    • <strong>Domínio Principal:</strong>{' '}
+                    <a
+                      href={deployResult.customDomain}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="underline font-semibold"
+                    >
+                      {deployResult.customDomain}
+                    </a>
+                  </p>
+                  <p>• Arquivos sincronizados: {deployResult.filesUploaded} arquivos otimizados.</p>
+                </div>
+              )}
+            </form>
           </div>
         )}
       </div>

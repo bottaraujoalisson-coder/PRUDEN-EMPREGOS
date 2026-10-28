@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://prudenempregos.com.br/sitemap.xml

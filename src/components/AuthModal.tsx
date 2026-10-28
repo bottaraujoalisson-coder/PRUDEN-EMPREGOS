@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
-  signInWithPopup,
-  GoogleAuthProvider,
-} from 'firebase/auth';
-import { auth } from '../firebase/config';
+  smartRegisterWithEmailPassword,
+  smartSignInWithEmailPassword,
+  smartSignInWithGoogle,
+  smartResetPassword,
+} from '../services/directCloudAuth';
 import {
   saveUserProfile,
   getUserProfile,
@@ -34,7 +32,8 @@ import {
   normalizeCNPJ,
   validateRegistrationInput,
 } from '../utils/validation';
-import { X, Loader2, CheckCircle2, AlertCircle, MapPin, Building2, ShieldCheck } from 'lucide-react';
+import { INITIAL_WELCOME_CREDITS } from '../utils/creditsData';
+import { X, Loader2, CheckCircle2, AlertCircle, MapPin, Building2, ShieldCheck, Gift } from 'lucide-react';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -270,10 +269,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         return 'Informe um endereço de e-mail válido.';
       case 'auth/popup-closed-by-user':
         return 'A janela de login foi fechada antes de concluir.';
+      case 'auth/popup-blocked':
+        return 'O navegador bloqueou a janela do Google. Permita pop-ups ou entre usando seu E-mail e Senha acima.';
+      case 'auth/unauthorized-domain':
+        return 'Para entrar agora neste domínio, utilize seu E-mail e Senha acima ou confirme na janela segura do Google.';
       case 'auth/operation-not-allowed':
-        return 'Use a opção "Continuar com o Google" abaixo.';
+        return 'Use seu E-mail e Senha acima ou a opção "Continuar com o Google".';
+      case 'auth/too-many-requests':
+        return rawMessage || 'Muitas tentativas seguidas. Aguarde alguns minutos por segurança.';
       default:
-        return rawMessage || 'Não foi possível concluir o acesso. Tente novamente.';
+        if (rawMessage && !rawMessage.startsWith('Firebase:')) {
+          return rawMessage;
+        }
+        return 'Não foi possível concluir o acesso. Verifique seus dados e tente novamente.';
     }
   };
 
@@ -290,11 +298,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
       try {
         setLoading(true);
-        await sendPasswordResetEmail(auth, email.trim());
-        showToast('E-mail de recuperação enviado.');
+        const resetRes = await smartResetPassword({
+          email: email.trim(),
+          document: documentInput.trim() || undefined,
+          newPassword: password.trim() || undefined,
+        });
+        showToast(resetRes.message);
+        setPassword('');
         setMode('login');
       } catch (err: any) {
-        setErrorMsg(getTranslatedFirebaseError(err?.code || ''));
+        setErrorMsg(getTranslatedFirebaseError(err?.code || '', err?.message));
       } finally {
         setLoading(false);
       }
@@ -347,7 +360,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           verifiedCompany = rfRes.data;
         }
 
-        // Verifica unicidade do CPF/CNPJ ANTES de criar o usuário no Firebase Auth
+        // Verifica unicidade do CPF/CNPJ ANTES de criar o usuário
         const availability = await checkDocumentAvailability(
           validation.normalized.documentType,
           validation.normalized.normalizedDocument
@@ -363,12 +376,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           return;
         }
 
-        const cred = await createUserWithEmailAndPassword(
-          auth,
+        const authRes = await smartRegisterWithEmailPassword(
           validation.normalized.email,
           password
         );
-        const uid = cred.user.uid;
+        const uid = authRes.uid;
 
         const isAdminUser = await checkIsAdmin(uid, validation.normalized.email);
         const enforcedRole = role;
@@ -411,9 +423,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         };
 
         if (enforcedRole === 'company') {
-          baseProfile.credits = 20;
+          baseProfile.credits = INITIAL_WELCOME_CREDITS;
         } else {
-          baseProfile.credits = 20;
+          baseProfile.credits = INITIAL_WELCOME_CREDITS;
           baseProfile.profileCompleteness = 45;
           baseProfile.savedJobIds = [];
         }
@@ -422,8 +434,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         await saveUserProfile(uid, cleanProfile);
         showToast(
           enforcedRole === 'company'
-            ? 'Empresa validada na Receita Federal e cadastrada com sucesso!'
-            : 'Conta de Candidato criada com sucesso!'
+            ? `Empresa cadastrada com sucesso! Você ganhou +${INITIAL_WELCOME_CREDITS} créditos grátis de boas-vindas.`
+            : `Conta criada com sucesso! Você ganhou +${INITIAL_WELCOME_CREDITS} créditos grátis para usar no site.`
         );
         onSuccess(cleanProfile);
         onClose();
@@ -444,8 +456,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       try {
         setLoading(true);
-        const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-        const uid = cred.user.uid;
+        const authRes = await smartSignInWithEmailPassword(email.trim(), password);
+        const uid = authRes.uid;
 
         const profile = await getUserProfile(uid);
         if (!profile) {
@@ -520,9 +532,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       setLoading(true);
-      const provider = new GoogleAuthProvider();
-      const res = await signInWithPopup(auth, provider);
-      const user = res.user;
+      const user = await smartSignInWithGoogle();
 
       let profile = await getUserProfile(user.uid);
       if (!profile) {
@@ -577,7 +587,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           state: stateUf || 'SP',
           skills: [],
           isVerified: true,
-          credits: 20,
+          credits: INITIAL_WELCOME_CREDITS,
           ...(role === 'company' ? {} : { profileCompleteness: 45, savedJobIds: [] }),
           createdAt: now,
           updatedAt: now,
@@ -586,7 +596,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         await saveUserProfile(user.uid, profile);
       }
 
-      showToast('Acesso realizado com sucesso.');
+      showToast(
+        mode === 'register'
+          ? `Cadastro concluído! Você ganhou +${INITIAL_WELCOME_CREDITS} créditos grátis de boas-vindas.`
+          : 'Acesso realizado com sucesso.'
+      );
       onSuccess(profile);
       onClose();
     } catch (err: any) {
@@ -647,7 +661,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 }}
                 className={`flex-1 pb-2.5 font-medium border-b-2 transition-colors cursor-pointer ${
                   mode === 'login'
-                    ? 'border-[#2457D6] text-[#2457D6] font-semibold'
+                    ? 'border-[#1D4ED8] text-[#1D4ED8] font-semibold'
                     : 'border-transparent text-[#667085] hover:text-[#172033]'
                 }`}
               >
@@ -663,26 +677,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 }}
                 className={`flex-1 pb-2.5 font-medium border-b-2 transition-colors cursor-pointer ${
                   mode === 'register'
-                    ? 'border-[#2457D6] text-[#2457D6] font-semibold'
+                    ? 'border-[#1D4ED8] text-[#1D4ED8] font-semibold'
                     : 'border-transparent text-[#667085] hover:text-[#172033]'
                 }`}
               >
-                Criar nova conta
+                Criar nova conta (+30 cr grátis)
               </button>
+            </div>
+          )}
+
+          {/* Banner de Bônus de Boas-Vindas no 1º Cadastro */}
+          {mode === 'register' && (
+            <div className="mb-4 p-3 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] flex items-start gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-[#1D4ED8] text-white flex items-center justify-center shrink-0 mt-0.5">
+                <Gift className="w-4 h-4" />
+              </div>
+              <div className="text-[12px] sm:text-[13px] leading-snug">
+                <p className="font-bold text-[#1E40AF]">
+                  Ganhe {INITIAL_WELCOME_CREDITS} créditos gratuitos no seu 1º cadastro
+                </p>
+                <p className="text-[#334155] mt-0.5">
+                  {role === 'candidate'
+                    ? 'Use sem nenhum custo para se candidatar a até 3 vagas (10 cr cada) ou gerar seu Currículo em PDF ATS (15 cr) + 1 candidatura.'
+                    : 'Use sem nenhum custo para publicar até 3 vagas (10 cr cada) ou publicar 1 vaga + destacá-la no topo do mural (15 cr).'}
+                </p>
+              </div>
             </div>
           )}
 
           {/* Account Type Selector (CPF vs CNPJ) */}
           {mode !== 'forgot' && (
             <div className="mb-4">
-              <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#F4F6FA] rounded-xl border border-[#E2E8F0]">
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#F4F7FE] rounded-xl border border-[#DBEAFE]">
                 <button
                   type="button"
                   onClick={() => handleSelectRoleTab('candidate')}
                   className={`min-h-[40px] px-3 rounded-lg text-[13px] font-semibold transition-colors cursor-pointer ${
                     role === 'candidate'
-                      ? 'bg-[#2457D6] text-white shadow-sm'
-                      : 'bg-transparent text-[#667085] hover:text-[#172033]'
+                      ? 'bg-[#1D4ED8] text-white shadow-sm'
+                      : 'bg-transparent text-[#475569] hover:text-[#1E40AF]'
                   }`}
                 >
                   Candidato (CPF)
@@ -692,8 +725,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   onClick={() => handleSelectRoleTab('company')}
                   className={`min-h-[40px] px-3 rounded-lg text-[13px] font-semibold transition-colors cursor-pointer ${
                     role === 'company'
-                      ? 'bg-[#102746] text-white shadow-sm'
-                      : 'bg-transparent text-[#667085] hover:text-[#172033]'
+                      ? 'bg-[#1E40AF] text-white shadow-sm'
+                      : 'bg-transparent text-[#475569] hover:text-[#1E40AF]'
                   }`}
                 >
                   Empresa (CNPJ)
@@ -987,6 +1020,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               )}
             </div>
 
+            {mode === 'forgot' && (
+              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-3">
+                <p className="text-[12px] text-[#475569] leading-relaxed">
+                  Para redefinir sua senha imediatamente com segurança, informe o{' '}
+                  <strong>CPF ou CNPJ cadastrado</strong> e sua nova senha (ou deixe em branco para receber por e-mail):
+                </p>
+                <div>
+                  <label htmlFor="auth-forgot-doc" className="text-[12px] font-semibold text-[#334155] block mb-1">
+                    CPF ou CNPJ do Titular (Verificação de Segurança)
+                  </label>
+                  <input
+                    id="auth-forgot-doc"
+                    type="text"
+                    inputMode="numeric"
+                    value={documentInput}
+                    onChange={(e) => handleDocumentChange(e.target.value)}
+                    placeholder="000.000.000-00 ou 00.000.000/0001-00"
+                    className="form-control text-sm tabular-nums"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="auth-forgot-new-password" className="text-[12px] font-semibold text-[#334155] block mb-1">
+                    Nova Senha (mín. 6 caracteres)
+                  </label>
+                  <input
+                    id="auth-forgot-new-password"
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Digite sua nova senha"
+                    className="form-control text-sm"
+                  />
+                </div>
+              </div>
+            )}
+
             {mode !== 'forgot' && (
               <div>
                 <div className="flex justify-between items-center mb-1.5">
@@ -1032,13 +1101,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               className="w-full btn-base btn-md btn-primary"
             >
               {loading
-                ? 'Validando na Receita Federal...'
+                ? 'Processando com segurança...'
                 : mode === 'forgot'
-                ? 'Enviar link de recuperação'
+                ? documentInput.trim() && password.trim()
+                  ? 'Verificar Documento e Redefinir Senha'
+                  : 'Enviar link de recuperação'
                 : mode === 'register'
                 ? role === 'company'
-                  ? 'Validar CNPJ e Cadastrar Empresa'
-                  : 'Cadastrar Candidato (CPF)'
+                  ? `Cadastrar Empresa e Ganhar +${INITIAL_WELCOME_CREDITS} Créditos`
+                  : `Criar Conta e Ganhar +${INITIAL_WELCOME_CREDITS} Créditos Grátis`
                 : 'Entrar'}
             </button>
 

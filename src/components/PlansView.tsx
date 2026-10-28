@@ -1,370 +1,595 @@
-import React, { useState } from 'react';
-import { UserProfile, PlanPeriod, PricingPlan } from '../types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { PricingPlan, PlanPeriod, UserProfile, CreditOrder, CreditTransaction } from '../types';
 import { formatPriceBRL } from '../utils/plansData';
 import {
   CREDIT_PACKAGES,
-  CREDIT_TRUST_BAR_ITEMS,
-  HERO_VALUE_PROPOSITION,
+  CANDIDATE_RESUME_CREDIT_PACKAGE,
   CreditPackage,
+  INITIAL_FREE_CREDITS,
+  APPLY_JOB_CREDIT_COST,
+  RESUME_PDF_CREDIT_COST,
+  POST_JOB_CREDIT_COST,
+  BOOST_JOB_CREDIT_COST,
 } from '../utils/creditsData';
+import {
+  getUserCreditsHistory,
+  checkCreditOrderStatus,
+  getMercadoPagoConfig,
+} from '../services/mercadopagoService';
+import { formatDate } from '../utils/matchAlgorithm';
 import {
   Check,
   ShieldCheck,
-  Sparkles,
-  HelpCircle,
   Coins,
-  Zap,
-  Lock,
+  QrCode,
+  CreditCard,
+  Sparkles,
   RefreshCw,
   CheckCircle2,
+  Clock,
+  ArrowRight,
+  FileText,
+  Briefcase,
+  Send,
+  Lock,
 } from 'lucide-react';
 
 interface PlansViewProps {
   currentUser: UserProfile | null;
-  initialRole?: 'company' | 'candidate';
-  onSelectPlan?: (plan: PricingPlan, period: PlanPeriod) => void;
+  initialRole?: 'candidate' | 'company';
+  onSelectPlan: (plan: PricingPlan, period: PlanPeriod) => void;
   onSelectCreditPackage?: (pkg: CreditPackage) => void;
-  onNavigate: (view: string, subTab?: string) => void;
-  onOpenAuth: (type: 'candidate' | 'company', mode?: 'login' | 'register') => void;
+  onOpenAuth: (type?: 'candidate' | 'company', mode?: 'login' | 'register') => void;
+  onNavigate?: (view: any, subTab?: string) => void;
+  onCreditsUpdated?: (newBalance: number) => void;
+  showToast?: (msg: string, type?: 'success' | 'error') => void;
 }
 
-const CREDITS_FAQ = [
-  {
-    question: 'Como funciona a compra de pacotes de créditos pelo Mercado Pago?',
-    answer:
-      'Você escolhe um dos pacotes de créditos acima e realiza o pagamento único via Pix instantâneo ou Cartão de Crédito (em até 12x) pelo Mercado Pago. Assim que o pagamento é aprovado oficialmente, os créditos são adicionados automaticamente na carteira da sua conta.',
-  },
-  {
-    question: 'Os créditos comprados possuem prazo de validade ou mensalidade?',
-    answer:
-      'Não! Todos os pacotes são de pagamento único, sem assinatura recorrente e sem fidelidade. Seus créditos são cumulativos e permanecem disponíveis na sua carteira até serem utilizados.',
-  },
-  {
-    question: 'É seguro comprar créditos? Existe risco de cobrança ou crédito duplicado?',
-    answer:
-      'Sim, 100% seguro. A integração utiliza o Mercado Pago com validação server-side de valores e trava de idempotência por pedido e por paymentId, garantindo que cada pagamento aprovado seja processado exatamente uma única vez.',
-  },
-  {
-    question: 'Como funciona a Garantia Incondicional de 7 dias?',
-    answer:
-      'Sua compra conta com a proteção do Mercado Pago. Caso desista da compra dos créditos não utilizados dentro de até 7 dias corridos, você pode solicitar o reembolso integral sem burocracia.',
-  },
-  {
-    question: 'Minha empresa recebe comprovante e histórico das transações?',
-    answer:
-      'Sim! No Painel da Empresa, na aba "Carteira de Créditos", você consulta em tempo real o saldo atualizado, o status de cada pedido no Mercado Pago e o extrato auditável de todas as recargas realizadas.',
-  },
-];
+type PackageFilter = 'all' | 'candidate' | 'company';
 
 export const PlansView: React.FC<PlansViewProps> = ({
   currentUser,
   onSelectCreditPackage,
-  onNavigate,
+  onOpenAuth,
+  onCreditsUpdated,
+  showToast,
 }) => {
-  const [expandedFaqIndex, setExpandedFaqIndex] = useState<number | null>(null);
+  const [filter, setFilter] = useState<PackageFilter>('all');
+  const [orders, setOrders] = useState<CreditOrder[]>([]);
+  const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [checkingOrderId, setCheckingOrderId] = useState<string | null>(null);
+  const [gatewayReady, setGatewayReady] = useState(true);
+
+  const loadHistory = useCallback(async () => {
+    if (!currentUser?.uid) return;
+    setLoadingHistory(true);
+    try {
+      const data = await getUserCreditsHistory(currentUser.uid);
+      setOrders(data.orders);
+      setTransactions(data.transactions);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [currentUser?.uid]);
+
+  useEffect(() => {
+    getMercadoPagoConfig()
+      .then(() => setGatewayReady(true))
+      .catch(() => setGatewayReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (currentUser?.uid) {
+      loadHistory();
+    } else {
+      setOrders([]);
+      setTransactions([]);
+    }
+  }, [currentUser?.uid, currentUser?.credits, loadHistory]);
+
+  const handleVerifyOrder = async (orderId: string) => {
+    if (!currentUser) return;
+    try {
+      setCheckingOrderId(orderId);
+      const res = await checkCreditOrderStatus(currentUser, orderId);
+      if (res.approved && typeof res.newBalance === 'number') {
+        onCreditsUpdated?.(res.newBalance);
+        showToast?.('Pagamento confirmado! Créditos adicionados à sua carteira.');
+      } else {
+        showToast?.('Pedido ainda aguarda confirmação de pagamento no Mercado Pago.');
+      }
+      await loadHistory();
+    } catch {
+      showToast?.('Não foi possível consultar o status deste pedido.', 'error');
+    } finally {
+      setCheckingOrderId(null);
+    }
+  };
+
+  const allPackages: Array<{ pkg: CreditPackage; audience: 'candidate' | 'company' | 'both' }> = [
+    { pkg: CANDIDATE_RESUME_CREDIT_PACKAGE, audience: 'candidate' },
+    { pkg: CREDIT_PACKAGES[0], audience: 'both' },
+    { pkg: CREDIT_PACKAGES[1], audience: 'company' },
+    { pkg: CREDIT_PACKAGES[2], audience: 'company' },
+  ];
+
+  const visiblePackages = allPackages.filter((item) => {
+    if (filter === 'all') return true;
+    if (filter === 'candidate') return item.audience === 'candidate' || item.audience === 'both';
+    return item.audience === 'company' || item.audience === 'both';
+  });
+
+  const currentCredits = currentUser?.credits ?? 0;
 
   return (
-    <div className="min-h-screen bg-[#F4F6FA] pb-14">
-      {/* 1. CLAREZA DE VALOR E ENQUADRAMENTO NO TOPO (Prevenção de Dúvidas e Aversão à Perda) */}
-      <section className="bg-[#0B1F3A] text-white border-b border-[#1E3A8A] pt-9 pb-12 md:py-15">
-        <div className="container-app text-center max-w-3xl space-y-3.5">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-semibold bg-white/10 text-[#93C5FD] border border-white/15">
-            <Sparkles className="w-3.5 h-3.5 text-[#38BDF8] shrink-0" />
-            <span>Carteira Digital de Créditos · Pagamento Único via Mercado Pago</span>
-          </div>
-
-          <h1 className="text-[24px] sm:text-[28px] md:text-[38px] font-bold text-white tracking-tight leading-tight">
-            {HERO_VALUE_PROPOSITION.title}
-          </h1>
-
-          <p className="text-[14px] sm:text-[15px] md:text-[17px] text-slate-200 leading-relaxed max-w-2xl mx-auto">
-            {HERO_VALUE_PROPOSITION.subtitle}
-          </p>
-
-          {/* Pílula/Banner de transparência rápida explicando a regra de uso */}
-          <div className="pt-1">
-            <div className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#132A4A]/95 border border-[#38BDF8]/30 text-[12px] sm:text-[13px] font-semibold text-[#E0F2FE] shadow-xs">
-              <Zap className="w-4 h-4 text-[#38BDF8] shrink-0" />
-              <span>{HERO_VALUE_PROPOSITION.transparencyPill}</span>
-            </div>
-          </div>
-
-          {currentUser && (
-            <div className="pt-1 flex flex-wrap items-center justify-center gap-3">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#132A4A] border border-white/15 text-sm text-white">
-                <Coins className="w-4 h-4 text-[#38BDF8]" />
-                <span>Seu saldo atual na carteira:</span>
-                <strong className="text-[#38BDF8] font-extrabold tabular-nums">
-                  {currentUser.credits ?? 5} créditos
-                </strong>
+    <div className="min-h-screen bg-[#F4F7FE] py-8 md:py-12">
+      <div className="container-app max-w-6xl space-y-8">
+        {/* 1. CABEÇALHO E CARTEIRA DO USUÁRIO */}
+        <section className="bg-white border border-[#DBEAFE] rounded-2xl p-6 md:p-8 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="space-y-2 max-w-2xl">
+              <div className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wider text-[#2563EB]">
+                <ShieldCheck className="w-4 h-4 text-[#1E40AF]" />
+                <span>Pagamentos e Créditos · Checkout Oficial Mercado Pago</span>
+                {gatewayReady && (
+                  <span className="inline-flex items-center gap-1 text-[#059669] ml-1">
+                    · Online
+                  </span>
+                )}
               </div>
-              {currentUser.type === 'company' && (
+              <h1 className="text-[24px] md:text-[32px] font-extrabold text-[#0F172A] tracking-tight leading-tight">
+                Recarregue créditos sob demanda, sem mensalidade
+              </h1>
+              <p className="text-[14px] md:text-[15px] text-[#475569] leading-relaxed">
+                Use seus créditos para se candidatar a vagas, gerar currículos em PDF com IA ou publicar e destacar vagas em Presidente Prudente e região. Seus créditos nunca expiram.
+              </p>
+            </div>
+
+            {/* Card de Saldo Logado OU Card de Bônus de 1º Cadastro */}
+            {currentUser ? (
+              <div className="bg-gradient-to-br from-[#1E40AF] to-[#2563EB] text-white rounded-2xl p-5 md:p-6 min-w-[280px] sm:min-w-[320px] shadow-md flex flex-col justify-between gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-blue-200 block">
+                      Saldo da sua Carteira
+                    </span>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span
+                        data-testid="plans-wallet-balance"
+                        className="text-[32px] font-extrabold tracking-tight tabular-nums leading-none"
+                      >
+                        {currentCredits}
+                      </span>
+                      <span className="text-[14px] font-semibold text-blue-100">
+                        créditos disponíveis
+                      </span>
+                    </div>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+                    <Coins className="w-5 h-5 text-amber-300" />
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-white/15 flex items-center justify-between gap-2 text-[12px] text-blue-100">
+                  <span>Conta: {currentUser.name}</span>
+                  <button
+                    type="button"
+                    onClick={loadHistory}
+                    disabled={loadingHistory}
+                    className="inline-flex items-center gap-1.5 font-semibold text-white hover:text-amber-200 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingHistory ? 'animate-spin' : ''}`} />
+                    <span>Atualizar</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-2xl p-5 md:p-6 min-w-[280px] sm:min-w-[330px] flex flex-col justify-between gap-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[12px] font-bold text-[#1E40AF]">
+                    <Sparkles className="w-4 h-4 text-[#2563EB]" />
+                    <span>Vantagem de 1º Cadastro</span>
+                  </div>
+                  <p className="text-[18px] font-extrabold text-[#0F172A] leading-snug">
+                    Ganhe {INITIAL_FREE_CREDITS} créditos grátis ao criar sua conta
+                  </p>
+                  <p className="text-[12px] text-[#475569] leading-relaxed">
+                    Teste a plataforma gratuitamente sem precisar informar cartão de crédito.
+                  </p>
+                </div>
                 <button
                   type="button"
-                  onClick={() => onNavigate('company', 'credits')}
-                  className="text-xs font-semibold text-[#93C5FD] hover:text-white underline cursor-pointer"
+                  onClick={() => onOpenAuth('candidate', 'register')}
+                  className="w-full min-h-[42px] px-4 py-2 rounded-xl bg-[#1E40AF] hover:bg-[#1E3A8A] text-white text-[13px] font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
                 >
-                  Ver extrato e histórico de pedidos →
+                  <span>Criar Conta e Ganhar {INITIAL_FREE_CREDITS} Créditos</span>
+                  <ArrowRight className="w-4 h-4" />
                 </button>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
+              </div>
+            )}
+          </div>
 
-      {/* 2 & 3 & 4. VIÉS DA ANCORAGEM (Mobile-First Order), LIMPEZA VISUAL E CTAs OTIMIZADOS */}
-      <section className="container-app -mt-6 relative z-10">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
-          {CREDIT_PACKAGES.map((pkg) => {
-            const isRecommended = Boolean(pkg.isFeatured);
-            return (
-              <div
-                key={pkg.id}
-                className={`surface-card p-6 md:p-7 flex flex-col justify-between relative rounded-2xl transition-all ${
-                  isRecommended
-                    ? 'order-first lg:order-none border-2 border-[#009EE3] shadow-xl lg:-translate-y-2 bg-white'
-                    : 'border border-[#CBD5E1] shadow-xs bg-white'
+          {/* 2. TABELA CLARA DE USO DE CRÉDITOS */}
+          <div className="mt-6 pt-6 border-t border-[#E2E8F0]">
+            <div className="text-[12px] font-bold uppercase tracking-wider text-[#64748B] mb-3">
+              Tabela Transparente de Utilização
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Send className="w-4 h-4 text-[#2563EB] shrink-0" />
+                  <div>
+                    <div className="text-[13px] font-bold text-[#0F172A]">Candidatar-se a vaga</div>
+                    <div className="text-[11px] text-[#64748B]">Envio direto à empresa</div>
+                  </div>
+                </div>
+                <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                  {APPLY_JOB_CREDIT_COST} cr
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <FileText className="w-4 h-4 text-[#2563EB] shrink-0" />
+                  <div>
+                    <div className="text-[13px] font-bold text-[#0F172A]">Currículo PDF com IA</div>
+                    <div className="text-[11px] text-[#64748B]">Padrão ATS pronto p/ envio</div>
+                  </div>
+                </div>
+                <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                  {RESUME_PDF_CREDIT_COST} cr
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Briefcase className="w-4 h-4 text-[#2563EB] shrink-0" />
+                  <div>
+                    <div className="text-[13px] font-bold text-[#0F172A]">Publicar nova vaga</div>
+                    <div className="text-[11px] text-[#64748B]">Ativa por 30 dias no mural</div>
+                  </div>
+                </div>
+                <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                  {POST_JOB_CREDIT_COST} cr
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <Sparkles className="w-4 h-4 text-[#2563EB] shrink-0" />
+                  <div>
+                    <div className="text-[13px] font-bold text-[#0F172A]">Destacar vaga no topo</div>
+                    <div className="text-[11px] text-[#64748B]">Prioridade nas buscas</div>
+                  </div>
+                </div>
+                <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                  {BOOST_JOB_CREDIT_COST} cr
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* 3. SELETOR DE PACOTES DE CRÉDITOS */}
+        <section className="space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-[20px] font-extrabold text-[#0F172A]">
+                Escolha seu Pacote de Créditos
+              </h2>
+              <p className="text-[13px] text-[#64748B]">
+                Liberação imediata via Pix ou Cartão de Crédito pelo Mercado Pago.
+              </p>
+            </div>
+
+            {/* Filtro limpo por perfil */}
+            <div className="inline-flex p-1 rounded-xl bg-white border border-[#DBEAFE] self-start">
+              <button
+                type="button"
+                onClick={() => setFilter('all')}
+                className={`px-3.5 py-1.5 rounded-lg text-[12px] font-bold transition-colors cursor-pointer ${
+                  filter === 'all'
+                    ? 'bg-[#1E40AF] text-white'
+                    : 'text-[#475569] hover:text-[#0F172A]'
                 }`}
               >
-                {pkg.badge && (
-                  <div
-                    className={`absolute -top-3.5 left-1/2 -translate-x-1/2 text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider py-1 px-3.5 rounded-full shadow-xs whitespace-nowrap ${
-                      pkg.badgeVariant === 'featured'
-                        ? 'bg-[#009EE3] text-white'
-                        : 'bg-slate-800 text-white'
-                    }`}
-                  >
-                    {pkg.badge}
-                  </div>
-                )}
+                Todos ({allPackages.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilter('candidate')}
+                className={`px-3.5 py-1.5 rounded-lg text-[12px] font-bold transition-colors cursor-pointer ${
+                  filter === 'candidate'
+                    ? 'bg-[#1E40AF] text-white'
+                    : 'text-[#475569] hover:text-[#0F172A]'
+                }`}
+              >
+                Candidatos
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilter('company')}
+                className={`px-3.5 py-1.5 rounded-lg text-[12px] font-bold transition-colors cursor-pointer ${
+                  filter === 'company'
+                    ? 'bg-[#1E40AF] text-white'
+                    : 'text-[#475569] hover:text-[#0F172A]'
+                }`}
+              >
+                Empresas
+              </button>
+            </div>
+          </div>
 
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-3 pt-1">
-                    <div>
-                      <h2 className="text-[19px] sm:text-[20px] font-bold text-[#0F172A]">
-                        {pkg.title}
-                      </h2>
-                      <p className="text-[13px] text-[#64748B] mt-1 leading-relaxed">
-                        {pkg.description}
-                      </p>
-                    </div>
+          <div
+            className={`grid grid-cols-1 gap-5 items-stretch ${
+              visiblePackages.length === 4
+                ? 'md:grid-cols-2 lg:grid-cols-4'
+                : 'md:grid-cols-3'
+            }`}
+          >
+            {visiblePackages.map(({ pkg }) => {
+              const isHighlighted = Boolean(pkg.isFeatured);
+              return (
+                <div
+                  key={pkg.id}
+                  data-testid={`credit-card-${pkg.id}`}
+                  className={`bg-white rounded-2xl p-6 flex flex-col justify-between relative transition-all ${
+                    isHighlighted
+                      ? 'border-2 border-[#2563EB] shadow-md'
+                      : 'border border-[#DBEAFE] shadow-sm hover:border-[#93C5FD]'
+                  }`}
+                >
+                  {pkg.badge && (
                     <div
-                      className={`px-3.5 py-2 rounded-xl text-center shrink-0 ${
-                        isRecommended
-                          ? 'bg-[#EFF6FF] border border-[#93C5FD]'
-                          : 'bg-[#F8FAFC] border border-[#E2E8F0]'
+                      className={`text-[10px] font-extrabold uppercase tracking-wider mb-3 inline-flex self-start px-2.5 py-0.5 rounded-md ${
+                        isHighlighted
+                          ? 'bg-[#1E40AF] text-white'
+                          : 'bg-[#EFF6FF] text-[#1E40AF]'
                       }`}
                     >
-                      <span
-                        className={`text-[20px] font-extrabold block leading-none tabular-nums ${
-                          isRecommended ? 'text-[#009EE3]' : 'text-[#0F172A]'
-                        }`}
-                      >
-                        +{pkg.totalCredits}
-                      </span>
-                      <span
-                        className={`text-[10px] font-bold uppercase tracking-wider ${
-                          isRecommended ? 'text-[#1E40AF]' : 'text-[#475569]'
-                        }`}
-                      >
-                        Créditos
-                      </span>
+                      {pkg.badge}
                     </div>
-                  </div>
+                  )}
 
-                  {/* Price Box */}
-                  <div className="pt-2 pb-4 border-b border-[#E2E8F0]">
-                    <div className="text-[12px] text-[#94A3B8] line-through font-medium tabular-nums">
-                      De {formatPriceBRL(pkg.originalPrice)}
+                  <div className="space-y-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-[17px] font-extrabold text-[#0F172A] leading-snug">
+                          {pkg.title}
+                        </h3>
+                        <p className="text-[12px] text-[#64748B] mt-0.5">
+                          {pkg.subtitle || pkg.description}
+                        </p>
+                      </div>
+                      <div className="px-2.5 py-1.5 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] text-center shrink-0">
+                        <span className="text-[17px] font-extrabold text-[#1E40AF] block leading-none tabular-nums">
+                          +{pkg.totalCredits}
+                        </span>
+                        <span className="text-[9px] font-bold uppercase text-[#2563EB]">
+                          créditos
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="text-[32px] md:text-[36px] font-extrabold text-[#0F172A] tabular-nums whitespace-nowrap">
-                        {formatPriceBRL(pkg.price)}
-                      </span>
-                      <span className="text-[13px] text-[#64748B] font-medium whitespace-nowrap">
-                        / pagamento único
-                      </span>
-                    </div>
-                    <div className="text-[12px] font-bold text-[#16835D] mt-1 tabular-nums">
-                      Sai por apenas {formatPriceBRL(pkg.costPerCredit)} cada crédito
-                      {pkg.bonusCredits > 0 ? ` (inclui +${pkg.bonusCredits} de bônus)` : ''}
-                    </div>
-                  </div>
 
-                  {/* Padronizados e enxutos bullets de benefícios (3 a 4 itens por pacote) */}
-                  <div className="space-y-2.5 pt-1">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-[#475569] block">
-                      Diferenciais do pacote:
-                    </span>
-                    <ul className="space-y-2.5">
-                      {pkg.features.map((feat, i) => (
+                    <div className="pt-3 pb-3 border-y border-[#F1F5F9]">
+                      <div className="text-[11px] text-[#94A3B8] line-through tabular-nums">
+                        De {formatPriceBRL(pkg.originalPrice)}
+                      </div>
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className="text-[28px] font-extrabold text-[#0F172A] tracking-tight tabular-nums">
+                          {formatPriceBRL(pkg.price)}
+                        </span>
+                        <span className="text-[11px] font-medium text-[#64748B]">/ único</span>
+                      </div>
+                      <div className="text-[11px] font-semibold text-[#059669] mt-1 tabular-nums">
+                        Sai a {formatPriceBRL(pkg.costPerCredit)} por crédito
+                      </div>
+                    </div>
+
+                    <ul className="space-y-2">
+                      {pkg.features.slice(0, 4).map((feature, idx) => (
                         <li
-                          key={i}
-                          className="flex items-start gap-2.5 text-[13px] text-[#334155] leading-snug"
+                          key={idx}
+                          className="flex items-start gap-2 text-[12px] text-[#334155] leading-snug"
                         >
-                          <Check className="w-4 h-4 text-[#16835D] shrink-0 mt-0.5" />
-                          <span>{feat}</span>
+                          <Check className="w-3.5 h-3.5 text-[#2563EB] shrink-0 mt-0.5" />
+                          <span>{feature}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
-                </div>
 
-                {/* 4. OTIMIZAÇÃO DOS BOTÕES DE AÇÃO (CTAs) - sem texto repetitivo abaixo */}
-                <div className="pt-5 mt-6 border-t border-[#E2E8F0]">
-                  <button
-                    type="button"
-                    onClick={() => onSelectCreditPackage?.(pkg)}
-                    className={`w-full min-h-[48px] btn-base btn-md font-bold text-[14px] cursor-pointer transition-all ${
-                      isRecommended
-                        ? 'bg-[#009EE3] hover:bg-[#0086C3] text-white shadow-md'
-                        : 'btn-primary'
-                    }`}
-                  >
-                    {pkg.ctaLabel}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* 3. BARRA COMPACTA DE CONFIANÇA ÚNICA (Trust Bar) logo abaixo dos cards */}
-        <div className="mt-5 bg-white border border-[#CBD5E1] rounded-xl px-4 py-3 shadow-2xs">
-          <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[12px] sm:text-[13px] font-semibold text-[#334155]">
-            {CREDIT_TRUST_BAR_ITEMS.map((item, index) => (
-              <div key={index} className="inline-flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-[#16835D] shrink-0" />
-                <span>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* 5. HEURÍSTICA DO AFETO E COMPACTAÇÃO DO FINAL DA PÁGINA ("Como funciona" mais compacto no mobile) */}
-      <section className="container-app mt-8 md:mt-10">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-5">
-          <div className="surface-card p-3.5 md:p-5 rounded-xl md:rounded-2xl border border-[#CBD5E1] flex items-center md:items-start gap-3">
-            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] text-[#009EE3] flex items-center justify-center shrink-0">
-              <Zap className="w-4 h-4 md:w-5 md:h-5" />
-            </div>
-            <div>
-              <h3 className="text-[14px] md:text-[15px] font-bold text-[#0F172A] leading-snug">
-                1. Escolha seu Pacote
-              </h3>
-              <p className="text-[12px] md:text-[13px] text-[#64748B] mt-0.5 leading-snug">
-                Selecione o volume ideal com bônus progressivos sem mensalidade.
-              </p>
-            </div>
-          </div>
-
-          <div className="surface-card p-3.5 md:p-5 rounded-xl md:rounded-2xl border border-[#CBD5E1] flex items-center md:items-start gap-3">
-            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-[#ECFDF5] border border-[#BBF7D0] text-[#16835D] flex items-center justify-center shrink-0">
-              <Lock className="w-4 h-4 md:w-5 md:h-5" />
-            </div>
-            <div>
-              <h3 className="text-[14px] md:text-[15px] font-bold text-[#0F172A] leading-snug">
-                2. Pague com Mercado Pago
-              </h3>
-              <p className="text-[12px] md:text-[13px] text-[#64748B] mt-0.5 leading-snug">
-                Pix instantâneo ou cartão em até 12x vinculado à sua conta.
-              </p>
-            </div>
-          </div>
-
-          <div className="surface-card p-3.5 md:p-5 rounded-xl md:rounded-2xl border border-[#CBD5E1] flex items-center md:items-start gap-3">
-            <div className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] text-[#009EE3] flex items-center justify-center shrink-0">
-              <RefreshCw className="w-4 h-4 md:w-5 md:h-5" />
-            </div>
-            <div>
-              <h3 className="text-[14px] md:text-[15px] font-bold text-[#0F172A] leading-snug">
-                3. Liberação Automática
-              </h3>
-              <p className="text-[12px] md:text-[13px] text-[#64748B] mt-0.5 leading-snug">
-                Créditos entram na hora na carteira após aprovação oficial.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Trust & Guarantee Box */}
-      <section className="container-app mt-8">
-        <div className="p-5 md:p-7 bg-white border border-[#CBD5E1] rounded-2xl shadow-xs flex flex-col md:flex-row items-center gap-4 md:gap-6">
-          <div className="w-13 h-13 md:w-15 md:h-15 rounded-2xl bg-[#ECFDF5] border border-[#16835D]/20 flex items-center justify-center shrink-0">
-            <ShieldCheck className="w-7 h-7 md:w-8 md:h-8 text-[#16835D]" />
-          </div>
-
-          <div className="flex-1 space-y-1 text-center md:text-left">
-            <h3 className="text-[16px] md:text-[18px] font-bold text-[#0F172A]">
-              Garantia Incondicional de 7 Dias com o Mercado Pago
-            </h3>
-            <p className="text-[13px] md:text-[14px] text-[#475569] leading-relaxed">
-              Compre seus créditos com total tranquilidade. Se dentro dos primeiros 7 dias você não utilizar o pacote e desejar o estorno, devolvemos 100% do seu valor direto pelo Mercado Pago sem burocracia.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-2.5 shrink-0">
-            <div className="text-center px-3.5 py-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-              <span className="text-[10px] font-bold text-[#64748B] block uppercase tracking-wider">
-                Segurança
-              </span>
-              <span className="text-[12px] font-bold text-[#009EE3]">Mercado Pago SSL</span>
-            </div>
-            <div className="text-center px-3.5 py-2 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl">
-              <span className="text-[10px] font-bold text-[#64748B] block uppercase tracking-wider">
-                Liberação
-              </span>
-              <span className="text-[12px] font-bold text-[#16835D]">Pix Imediato</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* FAQ Section */}
-      <section className="container-app mt-10 max-w-3xl">
-        <div className="text-center mb-5">
-          <h3 className="text-[20px] md:text-[22px] font-bold text-[#0F172A]">
-            Perguntas frequentes sobre os pacotes de créditos
-          </h3>
-          <p className="text-[13px] md:text-[14px] text-[#64748B] mt-1">
-            Tire suas dúvidas sobre pagamento via Mercado Pago, validade dos créditos e segurança.
-          </p>
-        </div>
-
-        <div className="space-y-2.5">
-          {CREDITS_FAQ.map((faq, idx) => {
-            const isExpanded = expandedFaqIndex === idx;
-            return (
-              <div
-                key={idx}
-                className="surface-card overflow-hidden border border-[#CBD5E1] rounded-xl bg-white"
-              >
-                <button
-                  type="button"
-                  onClick={() => setExpandedFaqIndex(isExpanded ? null : idx)}
-                  className="w-full text-left p-4 flex items-center justify-between gap-3 font-semibold text-[14px] md:text-[15px] text-[#0F172A] hover:bg-[#F8FAFC] transition-colors cursor-pointer min-h-[48px]"
-                >
-                  <span className="flex items-center gap-2.5">
-                    <HelpCircle className="w-4 h-4 text-[#009EE3] shrink-0" />
-                    <span>{faq.question}</span>
-                  </span>
-                  <span className="text-lg font-bold text-[#64748B] shrink-0">
-                    {isExpanded ? '−' : '+'}
-                  </span>
-                </button>
-
-                {isExpanded && (
-                  <div className="p-4 pt-3 text-[13px] md:text-[14px] text-[#475569] leading-relaxed border-t border-[#E2E8F0] bg-[#F8FAFC]">
-                    {faq.answer}
+                  <div className="pt-5 mt-5 border-t border-[#F1F5F9] space-y-2">
+                    <button
+                      type="button"
+                      data-testid={`buy-credit-pkg-${pkg.id}`}
+                      onClick={() => onSelectCreditPackage?.(pkg)}
+                      className={`w-full min-h-[44px] px-4 py-2.5 rounded-xl text-[13px] font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer ${
+                        isHighlighted
+                          ? 'bg-[#1E40AF] hover:bg-[#1E3A8A] text-white shadow-sm'
+                          : 'bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#1E40AF]'
+                      }`}
+                    >
+                      <span>Comprar +{pkg.totalCredits} Créditos</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </button>
+                    <div className="flex items-center justify-center gap-3 text-[11px] text-[#64748B]">
+                      <span className="inline-flex items-center gap-1">
+                        <QrCode className="w-3 h-3 text-[#009EE3]" /> Pix Imediato
+                      </span>
+                      <span>·</span>
+                      <span className="inline-flex items-center gap-1">
+                        <CreditCard className="w-3 h-3 text-[#2563EB]" /> Cartão até 12x
+                      </span>
+                    </div>
                   </div>
-                )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* 4. HISTÓRICO DE PEDIDOS E EXTRATO (VISÍVEL PARA USUÁRIO LOGADO) */}
+        {currentUser && (
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Pedidos Mercado Pago */}
+            <div className="bg-white border border-[#DBEAFE] rounded-2xl overflow-hidden shadow-sm">
+              <div className="p-5 border-b border-[#F1F5F9] flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-[16px] font-bold text-[#0F172A]">
+                    Meus Pedidos (Mercado Pago)
+                  </h3>
+                  <p className="text-[12px] text-[#64748B]">
+                    Histórico de recargas via Pix e Cartão
+                  </p>
+                </div>
+                <span className="text-[11px] font-semibold text-[#059669] bg-[#ECFDF5] px-2.5 py-1 rounded-md border border-[#A7F3D0]">
+                  Zero Duplicidade
+                </span>
               </div>
-            );
-          })}
-        </div>
-      </section>
+
+              {orders.length === 0 ? (
+                <div className="p-8 text-center text-[13px] text-[#64748B]">
+                  Nenhum pedido de recarga realizado ainda. Ao escolher um pacote acima, seu pedido aparecerá aqui em tempo real.
+                </div>
+              ) : (
+                <div className="divide-y divide-[#F1F5F9] max-h-[340px] overflow-y-auto">
+                  {orders.map((ord) => (
+                    <div
+                      key={ord.id}
+                      className="p-4 flex items-center justify-between gap-3 hover:bg-[#F8FAFC]"
+                    >
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[13px] font-bold text-[#0F172A] truncate">
+                            {ord.packageName}
+                          </span>
+                          <span className="text-[12px] font-extrabold text-[#2563EB] tabular-nums">
+                            +{ord.credits} cr
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#64748B] font-mono truncate">
+                          {ord.id} · {formatDate(ord.processedAt || ord.createdAt)}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className="text-[13px] font-bold text-[#0F172A] tabular-nums">
+                          {formatPriceBRL(ord.amount)}
+                        </span>
+                        {ord.status === 'approved' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#ECFDF5] text-[#059669]">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Creditado
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleVerifyOrder(ord.id)}
+                            disabled={checkingOrderId === ord.id}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-[#FEF3C7] hover:bg-[#FDE68A] text-[#B45309] transition-colors cursor-pointer"
+                          >
+                            <Clock className="w-3 h-3" />
+                            <span>
+                              {checkingOrderId === ord.id ? 'Verificando...' : 'Confirmar'}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Extrato de Créditos */}
+            <div className="bg-white border border-[#DBEAFE] rounded-2xl overflow-hidden shadow-sm">
+              <div className="p-5 border-b border-[#F1F5F9] flex items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-[16px] font-bold text-[#0F172A]">
+                    Extrato de Movimentações
+                  </h3>
+                  <p className="text-[12px] text-[#64748B]">
+                    Entradas de pacotes, bônus inicial e uso na plataforma
+                  </p>
+                </div>
+                <span className="text-[12px] font-bold text-[#1E40AF] tabular-nums">
+                  Saldo: {currentCredits} cr
+                </span>
+              </div>
+
+              <div className="divide-y divide-[#F1F5F9] max-h-[340px] overflow-y-auto">
+                {transactions.map((tx) => {
+                  const isDebit = tx.type === 'debit' || tx.type === 'usage' || tx.amount < 0;
+                  const absAmount = Math.abs(tx.amount);
+                  return (
+                    <div
+                      key={tx.id}
+                      className="p-4 flex items-center justify-between gap-3 hover:bg-[#F8FAFC]"
+                    >
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="text-[13px] font-medium text-[#0F172A] truncate">
+                          {tx.description}
+                        </div>
+                        <div className="text-[11px] text-[#64748B] tabular-nums">
+                          {formatDate(tx.createdAt)} · Saldo após: {tx.balanceAfter} cr
+                        </div>
+                      </div>
+                      <span
+                        className={`text-[13px] font-extrabold tabular-nums shrink-0 ${
+                          isDebit ? 'text-[#475569]' : 'text-[#059669]'
+                        }`}
+                      >
+                        {isDebit ? `-${absAmount}` : `+${absAmount}`} cr
+                      </span>
+                    </div>
+                  );
+                })}
+
+                {/* Linha permanente do Bônus de 1º Cadastro */}
+                <div className="p-4 flex items-center justify-between gap-3 bg-[#F8FAFC]/60">
+                  <div className="space-y-0.5">
+                    <div className="text-[13px] font-medium text-[#0F172A]">
+                      Bônus de Boas-Vindas (1º Cadastro Gratuito)
+                    </div>
+                    <div className="text-[11px] text-[#64748B]">
+                      Créditos iniciais concedidos gratuitamente na criação da conta
+                    </div>
+                  </div>
+                  <span className="text-[13px] font-extrabold text-[#059669] tabular-nums shrink-0">
+                    +{INITIAL_FREE_CREDITS} cr
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* 5. RODAPÉ DE SEGURANÇA MERCADO PAGO */}
+        <section className="bg-white border border-[#DBEAFE] rounded-2xl p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-[12px] text-[#475569]">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-[#EFF6FF] text-[#1E40AF] flex items-center justify-center shrink-0">
+              <Lock className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-bold text-[#0F172A] block">
+                Ambiente Seguro Integrado ao Mercado Pago
+              </span>
+              <span>
+                Os preços e quantidades de créditos são validados no servidor com proteção contra cobrança ou crédito duplicado.
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-[12px] font-semibold text-[#1E40AF] shrink-0">
+            <span>Pix Copia e Cola / QR Code</span>
+            <span>·</span>
+            <span>Cartão em até 12x</span>
+            <span>·</span>
+            <span>Créditos sem validade</span>
+          </div>
+        </section>
+      </div>
     </div>
   );
 };

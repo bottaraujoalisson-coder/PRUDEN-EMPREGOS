@@ -1,159 +1,191 @@
 import React from 'react';
-import { X, Coins, AlertTriangle, Sparkles, ArrowRight, ShieldCheck } from 'lucide-react';
-import { CREDIT_PACKAGES, CANDIDATE_RESUME_CREDIT_PACKAGE, CreditPackage } from '../utils/creditsData';
 import { UserProfile } from '../types';
+import {
+  CREDIT_PACKAGES,
+  CANDIDATE_RESUME_CREDIT_PACKAGE,
+  CreditPackage,
+  POST_JOB_CREDIT_COST,
+  BOOST_JOB_CREDIT_COST,
+  APPLY_JOB_CREDIT_COST,
+  RESUME_PDF_CREDIT_COST,
+} from '../utils/creditsData';
+import { formatPriceBRL } from '../utils/plansData';
+import { X, Coins, Check, ShieldCheck, ArrowRight } from 'lucide-react';
 
 interface CreditLockModalProps {
   isOpen: boolean;
-  onClose: () => void;
-  user: UserProfile | null;
+  user?: UserProfile | null;
+  currentCredits?: number;
   requiredCredits: number;
-  actionTitle: string;
-  actionDescription: string;
-  onBuyCredits: (planId: string) => void;
+  actionTitle?: string;
+  actionDescription?: string;
+  actionLabel?: string;
+  onClose: () => void;
+  onSelectPackage?: (pkg: CreditPackage) => void;
+  onBuyCredits?: (planId: string) => void;
   onOpenPlansView?: () => void;
 }
 
 export const CreditLockModal: React.FC<CreditLockModalProps> = ({
   isOpen,
-  onClose,
   user,
+  currentCredits,
   requiredCredits,
   actionTitle,
   actionDescription,
+  actionLabel,
+  onClose,
+  onSelectPackage,
   onBuyCredits,
   onOpenPlansView,
 }) => {
-  if (!isOpen || !user) return null;
+  if (!isOpen) return null;
 
-  const currentCredits = Number(user.credits || 0);
-  const missingCredits = Math.max(0, requiredCredits - currentCredits);
-  const isCompany = user.type === 'company' || user.role === 'company' || user.role === 'admin';
-  const plans: CreditPackage[] = isCompany
-    ? CREDIT_PACKAGES
-    : [CANDIDATE_RESUME_CREDIT_PACKAGE, ...CREDIT_PACKAGES.slice(0, 2)];
+  const resolvedCurrentCredits =
+    typeof currentCredits === 'number' ? currentCredits : Number(user?.credits ?? 0);
+  const missingCredits = Math.max(1, requiredCredits - resolvedCurrentCredits);
+  const resolvedTitle = actionTitle || actionLabel || 'continuar esta ação';
+  const packages = [CANDIDATE_RESUME_CREDIT_PACKAGE, ...CREDIT_PACKAGES];
+
+  const handleChoosePackage = (pkg: CreditPackage) => {
+    onClose();
+    if (onSelectPackage) {
+      onSelectPackage(pkg);
+    } else if (onBuyCredits) {
+      onBuyCredits(pkg.id);
+    }
+  };
 
   return (
     <div
-      className="fixed inset-0 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-xs overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="credit-lock-title"
     >
-      <div
-        className="bg-white rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-200"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="bg-slate-900 text-white px-6 py-5 flex items-start justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shrink-0">
-              <AlertTriangle size={22} />
+      <div className="bg-white border border-[#DBEAFE] rounded-2xl max-w-4xl w-full overflow-hidden shadow-2xl my-auto">
+        <div className="bg-gradient-to-r from-[#1E3A8A] via-[#1E40AF] to-[#2563EB] p-6 text-white flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-white/15 flex items-center justify-center shrink-0">
+              <Coins className="w-6 h-6 text-amber-300" />
             </div>
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-300 block">
-                Saldo Insuficiente para Prosseguir
+              <span className="inline-block text-[11px] font-bold uppercase tracking-wider text-blue-200">
+                Saldo Insuficiente · Faltam {missingCredits} créditos
               </span>
-              <h3 className="text-lg font-extrabold text-white leading-tight">
-                {actionTitle}
-              </h3>
+              <h2 id="credit-lock-title" className="text-[20px] font-extrabold leading-snug mt-0.5">
+                {resolvedTitle}
+              </h2>
+              <p className="text-[13px] text-blue-100 mt-0.5">
+                {actionDescription || (
+                  <>
+                    Esta ação requer <strong>{requiredCredits} créditos</strong> e seu saldo atual é de{' '}
+                    <strong>{resolvedCurrentCredits} créditos</strong>.
+                  </>
+                )}
+              </p>
             </div>
           </div>
+
           <button
+            type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
-            aria-label="Fechar alerta de créditos"
+            aria-label="Fechar"
+            className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           >
-            <X size={20} />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6 space-y-5">
-          <p className="text-sm text-slate-600 leading-relaxed">
-            {actionDescription}
-          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+            {packages.map((pkg) => (
+              <div
+                key={pkg.id}
+                className={`rounded-2xl p-5 flex flex-col justify-between relative transition-all ${
+                  pkg.isFeatured
+                    ? 'border-2 border-[#2563EB] bg-[#F8FAFC] shadow-md'
+                    : 'border border-[#DBEAFE] bg-white hover:border-[#93C5FD]'
+                }`}
+              >
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-[15px] font-extrabold text-[#0F172A] leading-snug">
+                        {pkg.title}
+                      </h3>
+                      <p className="text-[11px] text-[#64748B]">
+                        {pkg.subtitle || pkg.description}
+                      </p>
+                    </div>
+                    <span className="px-2 py-1 rounded-lg bg-[#EFF6FF] border border-[#BFDBFE] text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                      +{pkg.totalCredits} cr
+                    </span>
+                  </div>
 
-          <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-center">
-            <div>
-              <span className="text-[11px] font-semibold text-slate-500 block">Seu saldo atual</span>
-              <span className="text-base font-extrabold text-slate-900">{currentCredits} cr</span>
-            </div>
-            <div className="border-x border-slate-200">
-              <span className="text-[11px] font-semibold text-slate-500 block">Custo da ação</span>
-              <span className="text-base font-extrabold text-blue-700">{requiredCredits} cr</span>
-            </div>
-            <div>
-              <span className="text-[11px] font-semibold text-slate-500 block">Faltam</span>
-              <span className="text-base font-extrabold text-rose-600">+{missingCredits} cr</span>
-            </div>
-          </div>
+                  <div className="py-2.5 border-y border-[#E2E8F0]">
+                    <div className="text-[11px] text-[#94A3B8] line-through tabular-nums">
+                      De {formatPriceBRL(pkg.originalPrice)}
+                    </div>
+                    <div className="text-[24px] font-extrabold text-[#0F172A] tabular-nums leading-tight">
+                      {formatPriceBRL(pkg.price)}
+                    </div>
+                    <div className="text-[11px] font-semibold text-[#059669] tabular-nums">
+                      {formatPriceBRL(pkg.costPerCredit)} por crédito
+                    </div>
+                  </div>
 
-          <div className="space-y-2.5">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Sparkles size={13} className="text-blue-600" />
-              Escolha um pacote com liberação imediata:
-            </p>
-            <div className="grid grid-cols-1 gap-2.5">
-              {plans.map((plan) => (
-                <div
-                  key={plan.id}
-                  className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
-                    plan.isFeatured
-                      ? 'border-blue-600 bg-blue-50/50 shadow-sm'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
+                  <ul className="space-y-1.5">
+                    {pkg.features.slice(0, 3).map((feat, idx) => (
+                      <li
+                        key={idx}
+                        className="flex items-start gap-1.5 text-[11px] text-[#334155] leading-snug"
+                      >
+                        <Check className="w-3.5 h-3.5 text-[#2563EB] shrink-0 mt-0.5" />
+                        <span>{feat}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleChoosePackage(pkg)}
+                  className={`mt-4 w-full min-h-[42px] px-3 py-2 rounded-xl text-[12px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    pkg.isFeatured
+                      ? 'bg-[#1E40AF] hover:bg-[#1E3A8A] text-white'
+                      : 'bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#1E40AF]'
                   }`}
                 >
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-bold text-slate-900 text-sm">{plan.title}</span>
-                      <span className="text-xs font-extrabold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
-                        +{plan.totalCredits} créditos
-                      </span>
-                      {plan.isFeatured && (
-                        <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                          Mais escolhido
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      R$ {plan.price.toFixed(2).replace('.', ',')} • Não expira
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onBuyCredits(plan.id);
-                    }}
-                    className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shrink-0 ${
-                      plan.isFeatured
-                        ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
-                        : 'bg-slate-900 hover:bg-slate-800 text-white'
-                    }`}
-                  >
-                    <Coins size={14} />
-                    Recarregar
-                    <ArrowRight size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
+                  <span>Escolher +{pkg.totalCredits} cr</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
           </div>
 
-          <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs text-slate-500">
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck size={14} className="text-emerald-600" />
-              Checkout seguro via Pix ou Cartão
-            </span>
-            {onOpenPlansView && (
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  onOpenPlansView();
-                }}
-                className="font-bold text-blue-600 hover:text-blue-800"
-              >
-                Ver todos os pacotes
-              </button>
-            )}
+          <div className="pt-3 border-t border-[#F1F5F9] flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-[#64748B]">
+            <div className="flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-[#059669]" />
+              <span>Checkout Oficial Mercado Pago · Pix Instantâneo ou Cartão em até 12x</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span>
+                Candidatar-se: {APPLY_JOB_CREDIT_COST} cr · Currículo IA: {RESUME_PDF_CREDIT_COST} cr · Publicar: {POST_JOB_CREDIT_COST} cr · Destacar: {BOOST_JOB_CREDIT_COST} cr
+              </span>
+              {onOpenPlansView && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenPlansView();
+                  }}
+                  className="font-bold text-[#1E40AF] hover:underline cursor-pointer"
+                >
+                  Ver Central de Créditos
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  INITIAL_WELCOME_CREDITS,
   APPLY_JOB_CREDIT_COST,
   POST_JOB_CREDIT_COST,
   BOOST_JOB_CREDIT_COST,
@@ -19,7 +20,12 @@ import {
 import { Job, UserProfile } from '../types';
 
 describe('PrudenEmpregos Platform Rules & Architecture', () => {
-  it('1. Enforces exact credit costs for candidate and company actions', () => {
+  it('1. Enforces exact credit costs and 30 free welcome credits on new registration', () => {
+    assert.equal(
+      INITIAL_WELCOME_CREDITS,
+      30,
+      'New registrations must receive 30 free welcome credits'
+    );
     assert.equal(APPLY_JOB_CREDIT_COST, 10, 'Candidate job application must cost 10 credits');
     assert.equal(POST_JOB_CREDIT_COST, 10, 'Company job publication must cost 10 credits');
     assert.equal(BOOST_JOB_CREDIT_COST, 15, 'Company job highlight/boost must cost 15 credits');
@@ -28,6 +34,11 @@ describe('PrudenEmpregos Platform Rules & Architecture', () => {
       15,
       'Candidate ATS PDF resume generation must cost 15 credits'
     );
+    // 30 welcome credits allow 3 applications OR 1 ATS resume + 1 application (25 cr)
+    assert.ok(INITIAL_WELCOME_CREDITS >= APPLY_JOB_CREDIT_COST * 3);
+    assert.ok(INITIAL_WELCOME_CREDITS >= RESUME_GENERATION_CREDIT_COST + APPLY_JOB_CREDIT_COST);
+    // 30 welcome credits allow 3 job posts OR 1 job post + 1 boost (25 cr)
+    assert.ok(INITIAL_WELCOME_CREDITS >= POST_JOB_CREDIT_COST + BOOST_JOB_CREDIT_COST);
     assert.equal(RESUME_TEMPLATES.length, 3, 'Must provide 3 ATS-optimized resume templates');
   });
 

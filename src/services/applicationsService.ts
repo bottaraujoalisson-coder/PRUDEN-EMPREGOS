@@ -9,7 +9,8 @@ import {
   where,
   getDocs,
 } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { auth, db } from '../firebase/config';
+import { getActiveSessionUid } from './directCloudAuth';
 import { handleFirestoreError, OperationType } from '../firebase/errors';
 import { Application, ApplicationStatus, Job, UserProfile } from '../types';
 import {
@@ -22,6 +23,11 @@ export function subscribeCandidateApplications(
   candidateId: string,
   callback: (apps: Application[]) => void
 ): () => void {
+  const activeUid = auth.currentUser?.uid || getActiveSessionUid();
+  if (!activeUid || candidateId === 'cand-preview-uid') {
+    callback([]);
+    return () => {};
+  }
   const appsRef = collection(db, 'applications');
   const q = query(appsRef, where('candidateId', '==', candidateId));
 
@@ -35,8 +41,7 @@ export function subscribeCandidateApplications(
       loaded.sort((a, b) => new Date(b.appliedAt).getTime() - new Date(a.appliedAt).getTime());
       callback(loaded);
     },
-    (error) => {
-      console.warn('Applications snapshot listener error:', error);
+    () => {
       callback([]);
     }
   );
@@ -46,6 +51,11 @@ export function subscribeCompanyApplications(
   companyId: string,
   callback: (apps: Application[]) => void
 ): () => void {
+  const activeUid = auth.currentUser?.uid || getActiveSessionUid();
+  if (!activeUid) {
+    callback([]);
+    return () => {};
+  }
   const appsRef = collection(db, 'applications');
   const q = query(appsRef, where('companyId', '==', companyId));
 

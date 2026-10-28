@@ -49,7 +49,6 @@ import {
   Trash2,
   Eye,
   Sparkles,
-  ArrowRight,
   ShieldCheck,
   Coins,
   Check,
@@ -736,9 +735,9 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
     : POST_JOB_CREDIT_COST + (jobPremium ? BOOST_JOB_CREDIT_COST : 0);
 
   return (
-    <div className="min-h-screen bg-[#F4F6FA] pb-12">
-      {/* Corporate Employer Workspace Header (Privacy Compliant: No public raw CNPJ, Logo Upload) */}
-      <div className="bg-[#0B1F3A] text-white border-b border-[#1E3A8A] py-7">
+    <div className="min-h-screen bg-[#F4F7FE] pb-12">
+      {/* Corporate Employer Workspace Header */}
+      <div className="bg-gradient-to-b from-[#1E40AF] to-[#2563EB] text-white border-b border-[#1D4ED8] py-6">
         <div className="container-app flex flex-col sm:flex-row sm:items-center justify-between gap-5">
           <div className="flex items-center gap-4 min-w-0">
             <div className="relative shrink-0">
@@ -746,17 +745,17 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
                 <img
                   src={companyLogoDataUrl}
                   alt={user.name}
-                  className="w-14 h-14 rounded-2xl object-cover border-2 border-emerald-400/50 bg-white"
+                  className="w-14 h-14 rounded-2xl object-cover border-2 border-white/30 bg-white"
                 />
               ) : (
-                <div className="w-14 h-14 rounded-2xl bg-emerald-600/30 border-2 border-emerald-400/40 text-white font-bold text-lg flex items-center justify-center">
+                <div className="w-14 h-14 rounded-2xl bg-white/15 border-2 border-white/25 text-white font-bold text-lg flex items-center justify-center">
                   {(user.name || 'E').charAt(0).toUpperCase()}
                 </div>
               )}
               <label
                 htmlFor="company-header-logo-upload"
                 title="Enviar ou trocar logo da empresa"
-                className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-[#059669] hover:bg-emerald-500 text-white flex items-center justify-center border border-white/40 cursor-pointer shadow-xs"
+                className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white text-[#1E40AF] hover:bg-blue-50 flex items-center justify-center border border-[#93C5FD] cursor-pointer shadow-xs"
               >
                 <Camera className="w-3 h-3" />
                 <input
@@ -771,14 +770,14 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
 
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2.5">
-                <h1 className="text-[24px] md:text-[28px] font-bold text-white truncate">
+                <h1 className="text-[22px] md:text-[26px] font-bold text-white truncate">
                   {user.name}
                 </h1>
-                <span className="text-xs font-semibold text-[#6EE7B7] uppercase tracking-wider">
+                <span className="text-xs font-semibold text-blue-100">
                   · Empresa Verificada ({companySituacao})
                 </span>
               </div>
-              <p className="text-[14px] text-slate-300 mt-1 tabular-nums">
+              <p className="text-[13px] text-blue-100 mt-1 tabular-nums">
                 {user.email}
                 {user.city ? ` · ${user.city}` : ''} · Créditos disponíveis:{' '}
                 <strong data-testid="company-header-credits" className="text-white">
@@ -792,18 +791,18 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
             <button
               type="button"
               onClick={() => setShowCompanySettings(!showCompanySettings)}
-              className="px-3.5 py-2 rounded-lg font-semibold text-[13px] bg-white/10 hover:bg-white/20 text-white border border-white/15 transition-colors cursor-pointer flex items-center gap-1.5"
+              className="px-3.5 py-2 rounded-lg font-semibold text-[13px] bg-white/12 hover:bg-white/20 text-white border border-white/20 transition-colors cursor-pointer flex items-center gap-1.5"
             >
-              <Building2 className="w-4 h-4 text-emerald-300" />
-              <span>Dados & CNPJ (Interno)</span>
+              <Building2 className="w-4 h-4 text-blue-200" />
+              <span>Dados & CNPJ</span>
             </button>
             <button
               type="button"
               onClick={() => handleSelectTab('credits')}
-              className="px-4 py-2 rounded-lg font-semibold text-[13px] bg-[#009EE3] hover:bg-[#0086C3] text-white transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5 shadow-xs"
+              className="px-4 py-2 rounded-lg font-semibold text-[13px] bg-white/15 hover:bg-white/25 text-white border border-white/25 transition-colors cursor-pointer whitespace-nowrap flex items-center gap-1.5"
             >
-              <Coins className="w-4 h-4" />
-              <span>Comprar Créditos ({user.credits ?? 0})</span>
+              <Coins className="w-4 h-4 text-amber-300" />
+              <span>Créditos ({user.credits ?? 0})</span>
             </button>
             <button
               type="button"
@@ -811,7 +810,7 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
                 resetJobForm();
                 handleSelectTab('post');
               }}
-              className="px-5 py-2.5 rounded-lg font-semibold text-[14px] bg-[#059669] hover:bg-[#047857] text-white transition-colors self-start sm:self-center cursor-pointer whitespace-nowrap"
+              className="px-4 py-2 rounded-lg font-bold text-[13px] bg-white text-[#1E40AF] hover:bg-blue-50 transition-colors self-start sm:self-center cursor-pointer whitespace-nowrap shadow-xs"
             >
               + Publicar Vaga ({POST_JOB_CREDIT_COST} cr)
             </button>
@@ -824,16 +823,16 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
         <div className="container-app pt-6">
           <form
             onSubmit={handleSaveCompanySettings}
-            className="surface-card p-6 bg-white border-2 border-emerald-500/30 rounded-2xl space-y-4"
+            className="surface-card p-6 bg-white border border-[#93C5FD] rounded-2xl space-y-4"
           >
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+            <div className="flex items-center justify-between border-b border-[#DBEAFE] pb-3">
               <div>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 flex items-center gap-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#1D4ED8] flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4" />
-                  Registro Interno Protegido · Integração Receita Federal (BrasilAPI)
+                  Registro Interno · Receita Federal (BrasilAPI)
                 </span>
                 <h2 className="text-base font-bold text-slate-900 mt-0.5">
-                  Validação Cadastral de CNPJ e Identidade Visual da Empresa
+                  Validação Cadastral de CNPJ e Identidade da Empresa
                 </h2>
               </div>
               <button
@@ -892,10 +891,7 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
-              <p className="text-xs text-slate-500">
-                Proteção LGPD: O número do CNPJ fica restrito ao cadastro interno de verificação e nunca é exposto publicamente nos cards de vagas.
-              </p>
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-slate-100">
               <button
                 type="submit"
                 disabled={savingCompanyProfile || checkingCnpj}
@@ -911,7 +907,7 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
       )}
 
       {/* Sub-Navigation Bar */}
-      <div className="bg-white border-b border-[#CBD5E1] mb-8">
+      <div className="bg-white border-b border-[#DBEAFE] mb-8">
         <div className="container-app flex items-center gap-6 overflow-x-auto">
           <button
             type="button"
@@ -919,10 +915,10 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
               setEditingJob(null);
               handleSelectTab('jobs');
             }}
-            className={`py-4 text-[15px] border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+            className={`py-4 text-[14px] sm:text-[15px] border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
               activeTab === 'jobs'
-                ? 'border-[#059669] text-[#059669] font-bold'
-                : 'border-transparent text-[#475569] hover:text-[#0F172A] font-medium'
+                ? 'border-[#1D4ED8] text-[#1D4ED8] font-bold'
+                : 'border-transparent text-[#475569] hover:text-[#1D4ED8] font-medium'
             }`}
           >
             Minhas Vagas ({myJobs.length})
@@ -933,10 +929,10 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
               setEditingJob(null);
               handleSelectTab('candidates');
             }}
-            className={`py-4 text-[15px] border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+            className={`py-4 text-[14px] sm:text-[15px] border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
               activeTab === 'candidates'
-                ? 'border-[#059669] text-[#059669] font-bold'
-                : 'border-transparent text-[#475569] hover:text-[#0F172A] font-medium'
+                ? 'border-[#1D4ED8] text-[#1D4ED8] font-bold'
+                : 'border-transparent text-[#475569] hover:text-[#1D4ED8] font-medium'
             }`}
           >
             Candidatos Inscritos ({myApplications.length})
@@ -944,10 +940,10 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
           <button
             type="button"
             onClick={() => handleSelectTab('post')}
-            className={`py-4 text-[15px] border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
+            className={`py-4 text-[14px] sm:text-[15px] border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
               activeTab === 'post'
-                ? 'border-[#059669] text-[#059669] font-bold'
-                : 'border-transparent text-[#475569] hover:text-[#0F172A] font-medium'
+                ? 'border-[#1D4ED8] text-[#1D4ED8] font-bold'
+                : 'border-transparent text-[#475569] hover:text-[#1D4ED8] font-medium'
             }`}
           >
             {editingJob ? 'Editar Vaga' : 'Publicar Nova Vaga'}
@@ -958,10 +954,10 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
               setEditingJob(null);
               handleSelectTab('credits');
             }}
-            className={`py-4 text-[15px] border-b-2 transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+            className={`py-4 text-[14px] sm:text-[15px] border-b-2 transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
               activeTab === 'credits'
-                ? 'border-[#009EE3] text-[#009EE3] font-bold'
-                : 'border-transparent text-[#475569] hover:text-[#0F172A] font-medium'
+                ? 'border-[#1D4ED8] text-[#1D4ED8] font-bold'
+                : 'border-transparent text-[#475569] hover:text-[#1D4ED8] font-medium'
             }`}
           >
             <Coins className="w-4 h-4" />
@@ -971,33 +967,6 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
       </div>
 
       <div className="container-app space-y-6">
-        {/* Credit Wallet Quick Callout */}
-        {activeTab !== 'credits' && (
-          <div className="surface-card p-4 sm:p-5 bg-gradient-to-r from-[#EFF6FF] to-[#F8FAFC] border border-[#BFDBFE] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-lg bg-[#009EE3]/10 text-[#009EE3] flex items-center justify-center shrink-0 mt-0.5">
-                <Coins className="w-5 h-5" />
-              </div>
-              <div className="space-y-0.5">
-                <h3 className="text-[14px] font-bold text-[#0F172A]">
-                  Carteira Digital de Créditos: {user.credits ?? 0} créditos disponíveis
-                </h3>
-                <p className="text-[12px] text-[#475569] leading-relaxed">
-                  Publicar nova vaga: <strong>{POST_JOB_CREDIT_COST} créditos</strong> · Destacar/Impulsionar vaga no topo: <strong>{BOOST_JOB_CREDIT_COST} créditos</strong> · Créditos não expiram.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => handleSelectTab('credits')}
-              className="btn-base btn-sm bg-[#009EE3] hover:bg-[#0086C3] text-white font-bold shrink-0 shadow-xs flex items-center gap-1.5 cursor-pointer self-start sm:self-center"
-            >
-              <span>Recarregar Créditos</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
 
         {/* TAB 1: STRUCTURED COMPANY JOBS TABLE WITH 15-CREDIT BOOST ACTION */}
         {activeTab === 'jobs' && (
@@ -2167,21 +2136,21 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
 
                 {/* Resumo de Créditos da Publicação */}
                 {!editingJob && (
-                  <div className="p-4 rounded-xl bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="p-4 rounded-xl bg-gradient-to-r from-[#1E40AF] to-[#2563EB] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-300 block">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-blue-200 block">
                         Resumo de Créditos da Operação
                       </span>
                       <p className="text-sm font-semibold mt-0.5">
                         Publicação de nova vaga ({POST_JOB_CREDIT_COST} cr)
                         {jobPremium ? ` + Destaque no topo (${BOOST_JOB_CREDIT_COST} cr)` : ''}
                       </p>
-                      <p className="text-xs text-slate-300 mt-0.5">
+                      <p className="text-xs text-blue-100 mt-0.5">
                         Seu saldo atual: <strong>{user.credits ?? 0} créditos</strong>
                       </p>
                     </div>
                     <div className="text-left sm:text-right">
-                      <span className="text-xs text-slate-300 block">Total a debitar</span>
+                      <span className="text-xs text-blue-100 block">Total a debitar</span>
                       <span className="text-xl font-extrabold text-amber-300 tabular-nums">
                         {totalPublishCreditsCost} créditos
                       </span>
@@ -2192,7 +2161,7 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
             )}
 
             {/* Wizard Navigation Footer */}
-            <div className="surface-card p-4 sm:p-5 bg-white border border-slate-200 flex items-center justify-between gap-3">
+            <div className="surface-card p-4 sm:p-5 bg-white border border-[#DBEAFE] flex items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => {
@@ -2231,7 +2200,7 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
                     type="submit"
                     disabled={submittingJob}
                     data-testid="company-publish-job-btn"
-                    className="py-2.5 px-6 rounded-xl bg-[#059669] hover:bg-[#047857] text-white text-sm font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-2"
+                    className="btn-base btn-md btn-primary font-bold inline-flex items-center gap-2"
                   >
                     <Coins className="w-4 h-4" />
                     <span>
@@ -2483,13 +2452,20 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#E2E8F0]">
-                      {creditTransactions.map((tx) => (
+                      {creditTransactions.map((tx) => {
+                        const isDebit = tx.type === 'debit' || tx.type === 'usage' || tx.amount < 0;
+                        const absAmount = Math.abs(tx.amount);
+                        return (
                         <tr key={tx.id} className="hover:bg-[#F8FAFC]">
                           <td className="py-3.5 px-5 text-[#0F172A] font-medium">
                             {tx.description}
                           </td>
-                          <td className="py-3.5 px-4 font-bold text-[#16835D] tabular-nums">
-                            {tx.type === 'debit' ? `-${tx.amount}` : `+${tx.amount}`} créditos
+                          <td
+                            className={`py-3.5 px-4 font-bold tabular-nums ${
+                              isDebit ? 'text-[#475569]' : 'text-[#16835D]'
+                            }`}
+                          >
+                            {isDebit ? `-${absAmount}` : `+${absAmount}`} créditos
                           </td>
                           <td className="py-3.5 px-4 font-semibold text-[#0F172A] tabular-nums">
                             {tx.balanceAfter} créditos
@@ -2498,7 +2474,8 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
                             {formatDate(tx.createdAt)}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

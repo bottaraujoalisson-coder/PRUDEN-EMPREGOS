@@ -330,38 +330,36 @@ export const HomeView: React.FC<HomeViewProps> = ({
     onOpenAuth('candidate', 'register');
   };
 
-  const handleB2bCtaClick = () => {
-    if (userIsCandidate) {
-      showToast?.(
-        'Você está conectado como Candidato (CPF). Para anunciar vagas, acesse com conta empresarial (CNPJ).',
-        'error'
-      );
-      return;
-    }
-    if (userIsCompany) {
-      onNavigate('company', 'post');
-      return;
-    }
-    onOpenAuth('company', 'register');
-  };
-
   return (
-    <main className="min-h-screen bg-[#FAFAFA]">
-      {/* 1. HERO E PROPOSTA DE VALOR */}
-      <section className="bg-white border-b border-[#EAECEF]">
-        <div className="container-app pt-8 pb-7 md:pt-14 md:pb-10">
+    <main className="min-h-screen bg-[#F4F7FE]">
+      {/* 1. HERO EM AZUL COM TRANSIÇÃO SUAVE */}
+      <section className="bg-gradient-to-b from-[#1E40AF] to-[#2563EB] text-white border-b border-[#1D4ED8]">
+        <div className="container-app pt-8 pb-8 md:pt-12 md:pb-10">
           <div className="max-w-2xl mb-6">
-            <h1 className="text-[28px] sm:text-[34px] md:text-[38px] font-bold text-[#0F172A] leading-[1.15] tracking-[-0.03em] [text-wrap:balance]">
+            <h1 className="text-[28px] sm:text-[34px] md:text-[38px] font-bold text-white leading-[1.15] tracking-[-0.03em] [text-wrap:balance]">
               Encontre sua próxima vaga em Presidente Prudente.
             </h1>
 
-            <div className="mt-3 inline-flex items-start sm:items-center gap-2.5 p-3 sm:px-3.5 sm:py-2 rounded-xl bg-[#ECFDF5]/80 border border-[#A7F3D0] text-[#065F46]">
-              <span className="w-6 h-6 rounded-lg bg-[#10B981]/15 text-[#059669] inline-flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
-                <Zap className="w-3.5 h-3.5" />
-              </span>
-              <p className="text-[14px] sm:text-[15px] text-[#065F46] font-medium leading-snug">
-                Candidatura rápida com 1 clique direto para as empresas contratantes da região, com análise automática do seu perfil no envio.
-              </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2.5">
+              <div className="inline-flex items-start sm:items-center gap-2.5 p-2.5 sm:px-3.5 sm:py-2 rounded-xl bg-white/12 border border-white/20 text-blue-50">
+                <span className="w-6 h-6 rounded-lg bg-white/15 text-sky-300 inline-flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
+                  <Zap className="w-3.5 h-3.5" />
+                </span>
+                <p className="text-[13px] sm:text-[14px] text-blue-50 font-medium leading-snug">
+                  Candidatura rápida com 1 clique direto para as empresas da região.
+                </p>
+              </div>
+
+              {!currentUser && (
+                <button
+                  type="button"
+                  onClick={() => onOpenAuth('candidate', 'register')}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white text-[#1E40AF] hover:bg-blue-50 font-semibold text-[13px] shadow-xs transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-[#2563EB] shrink-0" />
+                  <span>Novo cadastro: ganhe 30 créditos grátis para usar sem custo</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -370,15 +368,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
             role="search"
             aria-label="Buscar vagas de emprego"
             onSubmit={handleSearchSubmit}
-            className="bg-white p-1.5 rounded-2xl border border-[#E4E4E7] shadow-[0_2px_12px_rgba(15,23,42,0.04)] flex flex-col md:flex-row items-stretch md:items-center gap-1.5"
+            className="bg-white p-1.5 rounded-2xl border border-[#DBEAFE] shadow-md flex flex-col md:flex-row items-stretch md:items-center gap-1.5"
           >
             <div className="flex-1 flex items-center px-3.5 min-h-[44px]">
-              <Search className="w-4 h-4 text-[#94A3B8] mr-2.5 shrink-0" />
+              <Search className="w-4 h-4 text-[#2563EB] mr-2.5 shrink-0" />
               <input
                 type="search"
                 aria-label="Cargo, área ou habilidade"
                 placeholder="Cargo, área ou habilidade..."
-                className="w-full bg-transparent border-none outline-none text-[#0F172A] placeholder-[#94A3B8] text-[15px]"
+                className="w-full bg-transparent border-none outline-none text-[#0F172A] placeholder-[#64748B] text-[15px]"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -387,17 +385,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   type="button"
                   onClick={() => setSearchTerm('')}
                   aria-label="Limpar termo de busca"
-                  className="w-7 h-7 inline-flex items-center justify-center text-[#94A3B8] hover:text-[#0F172A] rounded-md cursor-pointer"
+                  className="w-7 h-7 inline-flex items-center justify-center text-[#64748B] hover:text-[#1D4ED8] rounded-md cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
               )}
             </div>
 
-            <div className="hidden md:block w-px h-6 bg-[#EAECEF]" aria-hidden="true" />
+            <div className="hidden md:block w-px h-6 bg-[#DBEAFE]" aria-hidden="true" />
 
-            <div className="flex items-center md:w-[295px] min-h-[44px] px-3 border-t md:border-t-0 border-[#F4F4F5]">
-              <MapPin className="w-4 h-4 text-[#64748B] mr-2 shrink-0" />
+            <div className="flex items-center md:w-[295px] min-h-[44px] px-3 border-t md:border-t-0 border-[#EFF6FF]">
+              <MapPin className="w-4 h-4 text-[#2563EB] mr-2 shrink-0" />
               <select
                 aria-label="Selecionar localização"
                 value={filterCity}
@@ -414,42 +412,44 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
             <button
               type="submit"
-              className="min-h-[44px] px-6 rounded-xl font-semibold text-[14px] bg-[#0F172A] hover:bg-[#1E293B] text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              className="min-h-[44px] px-6 rounded-xl font-semibold text-[14px] bg-[#1D4ED8] hover:bg-[#1E40AF] text-white transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
               Buscar vagas
             </button>
           </form>
 
-          {/* 3. CHIPS LEVES DE SUGESTÃO RÁPIDA */}
-          <div className="mt-3.5 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pb-0.5">
-            <span className="text-[12px] font-medium text-[#64748B] shrink-0">
-              Populares:
-            </span>
-            {QUICK_SUGGESTION_CHIPS.map((chip) => {
-              const isSelected = searchTerm.toLowerCase() === chip.value.toLowerCase();
-              return (
-                <button
-                  key={chip.label}
-                  type="button"
-                  onClick={() => handleQuickChipClick(chip.value)}
-                  aria-pressed={isSelected}
-                  className={`h-8 px-3 rounded-lg text-[12px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    isSelected
-                      ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                      : 'bg-[#F8FAFC] text-[#475569] border-[#E2E8F0] hover:border-[#CBD5E1] hover:text-[#0F172A]'
-                  }`}
-                >
-                  {chip.label}
-                </button>
-              );
-            })}
-          </div>
+          {/* 3. CHIPS LEVES DE SUGESTÃO RÁPIDA (exibidos apenas quando não há filtros de vagas ativas) */}
+          {activeJobs.length === 0 && (
+            <div className="mt-3.5 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pb-0.5">
+              <span className="text-[12px] font-medium text-blue-100 shrink-0">
+                Áreas rápidas:
+              </span>
+              {QUICK_SUGGESTION_CHIPS.map((chip) => {
+                const isSelected = searchTerm.toLowerCase() === chip.value.toLowerCase();
+                return (
+                  <button
+                    key={chip.label}
+                    type="button"
+                    onClick={() => handleQuickChipClick(chip.value)}
+                    aria-pressed={isSelected}
+                    className={`h-8 px-3 rounded-lg text-[12px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                      isSelected
+                        ? 'bg-white text-[#1E40AF] border-white font-semibold'
+                        : 'bg-white/10 text-blue-50 border-white/20 hover:bg-white/20'
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
-          {/* FILTROS SECUNDÁRIOS */}
+          {/* FILTROS RÁPIDOS UNIFICADOS */}
           {activeJobs.length > 0 && (
             <div
               aria-label="Filtros rápidos"
-              className="mt-3 pt-3 border-t border-[#F1F5F9] flex flex-nowrap md:flex-wrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="mt-3.5 flex flex-nowrap md:flex-wrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <select
                 aria-label="Filtrar por área profissional"
@@ -457,8 +457,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onChange={(e) => setFilterCategory(e.target.value)}
                 className={`h-9 px-3 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   filterCategory !== 'Todas as Áreas'
-                    ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                    : 'bg-[#FAFAFA] text-[#334155] border-[#E4E4E7] hover:border-[#CBD5E1]'
+                    ? 'bg-white text-[#1E40AF] border-white font-semibold'
+                    : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
                 }`}
               >
                 {categories.map((cat) => (
@@ -474,8 +474,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onChange={(e) => setFilterWorkModel(e.target.value)}
                 className={`h-9 px-3 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   filterWorkModel !== 'Todos os Modelos'
-                    ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                    : 'bg-[#FAFAFA] text-[#334155] border-[#E4E4E7] hover:border-[#CBD5E1]'
+                    ? 'bg-white text-[#1E40AF] border-white font-semibold'
+                    : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
                 }`}
               >
                 <option value="Todos os Modelos" className="bg-white text-[#0F172A]">
@@ -498,8 +498,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onChange={(e) => setFilterContract(e.target.value)}
                 className={`h-9 px-3 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   filterContract !== 'Todos os Contratos'
-                    ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                    : 'bg-[#FAFAFA] text-[#334155] border-[#E4E4E7] hover:border-[#CBD5E1]'
+                    ? 'bg-white text-[#1E40AF] border-white font-semibold'
+                    : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
                 }`}
               >
                 <option value="Todos os Contratos" className="bg-white text-[#0F172A]">
@@ -528,8 +528,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 aria-pressed={filterWithSalary}
                 className={`h-9 px-3 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   filterWithSalary
-                    ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                    : 'bg-[#FAFAFA] text-[#334155] border-[#E4E4E7] hover:border-[#CBD5E1]'
+                    ? 'bg-white text-[#1E40AF] border-white font-semibold'
+                    : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
                 }`}
               >
                 Com salário informado
@@ -541,8 +541,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 aria-pressed={filterFirstJob}
                 className={`h-9 px-3 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   filterFirstJob
-                    ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                    : 'bg-[#FAFAFA] text-[#334155] border-[#E4E4E7] hover:border-[#CBD5E1]'
+                    ? 'bg-white text-[#1E40AF] border-white font-semibold'
+                    : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
                 }`}
               >
                 Primeiro emprego
@@ -553,8 +553,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onClick={() => setMoreFiltersOpen(true)}
                 className={`h-9 px-3 rounded-lg text-[13px] font-medium border inline-flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   secondaryFilterCount > 0
-                    ? 'bg-[#0F172A] text-white border-[#0F172A]'
-                    : 'bg-[#FAFAFA] text-[#334155] border-[#E4E4E7] hover:border-[#CBD5E1]'
+                    ? 'bg-white text-[#1E40AF] border-white font-semibold'
+                    : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
                 }`}
               >
                 <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -568,7 +568,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <button
                   type="button"
                   onClick={clearFilters}
-                  className="h-9 px-2.5 text-[13px] font-medium text-[#64748B] hover:text-[#0F172A] inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
+                  className="h-9 px-2.5 text-[13px] font-medium text-blue-100 hover:text-white inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <X className="w-3.5 h-3.5" />
                   <span>Limpar</span>
@@ -741,7 +741,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </h3>
 
                 <p className="text-[14px] sm:text-[15px] text-[#64748B] mb-6 leading-relaxed">
-                  Novas oportunidades reais da região podem surgir a qualquer momento. Cadastre seu currículo agora para garantir prioridade máxima e se candidatar com 1 clique assim que as empresas publicarem.
+                  Novas oportunidades reais da região podem surgir a qualquer momento. Realize seu primeiro cadastro agora e <strong>ganhe 30 créditos gratuitos</strong> sem nenhum custo para se candidatar às vagas ou gerar seu currículo em PDF ATS.
                 </p>
 
                 <div className="flex flex-col items-center gap-3">
@@ -750,7 +750,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     onClick={handleCandidatePriorityCta}
                     className="btn-base btn-md btn-primary w-full sm:w-auto min-h-[46px] px-6 font-semibold shadow-xs cursor-pointer"
                   >
-                    Cadastrar meu currículo com prioridade
+                    {currentUser
+                      ? 'Completar meu currículo com prioridade'
+                      : 'Criar conta e ganhar 30 créditos grátis'}
                   </button>
 
                   <button
@@ -938,28 +940,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </button>
               </div>
             )}
-          </div>
-        )}
-
-        {/* SEÇÃO DE EMPRESAS */}
-        {!userIsCompany && (
-          <div className="mt-10 bg-slate-50 border border-slate-200/90 rounded-2xl p-6 sm:p-7 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-[15px] sm:text-[16px] font-semibold text-[#0F172A]">
-                Sua empresa está contratando em Presidente Prudente?
-              </h3>
-              <p className="text-[13px] text-[#64748B] mt-1 leading-relaxed">
-                Cadastre sua empresa com validação automática na Receita Federal (CNPJ) e receba currículos analisados com inteligência.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={handleB2bCtaClick}
-              className="btn-base btn-md btn-secondary bg-white hover:bg-slate-100 w-full sm:w-auto shrink-0 cursor-pointer"
-            >
-              <span>Publicar vaga corporativa</span>
-              <ArrowUpRight className="w-4 h-4" />
-            </button>
           </div>
         )}
       </section>

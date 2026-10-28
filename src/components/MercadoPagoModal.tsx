@@ -1,58 +1,64 @@
 import React, { useState, useEffect } from 'react';
 import { PricingPlan, PlanPeriod, UserProfile } from '../types';
+import { formatPriceBRL } from '../utils/plansData';
 import { CreditPackage } from '../utils/creditsData';
 import {
-  processMercadoPagoPix,
+  getMercadoPagoConfig,
   createMercadoPagoPreference,
+  processMercadoPagoPix,
   activateUserPlan,
   confirmAndCreditOrder,
   checkCreditOrderStatus,
-  getMercadoPagoConfig,
+  MercadoPagoConfigResponse,
   ProcessPixResponse,
   CreatePreferenceResponse,
-  MercadoPagoConfigResponse,
 } from '../services/mercadopagoService';
-import {
-  formatPriceBRL,
-  formatDailyEquivalent,
-  calculateSavings,
-  getPlanProtectionReason,
-} from '../utils/plansData';
+
+const PERIOD_LABELS: Record<PlanPeriod, string> = {
+  monthly: 'Mensal',
+  yearly: 'Anual',
+};
+
+function getPlanPriceForPeriod(plan: PricingPlan, period: PlanPeriod): number {
+  return period === 'yearly' ? plan.yearlyTotal : plan.monthlyPrice;
+}
 import {
   X,
-  CheckCircle2,
-  ShieldCheck,
-  Copy,
-  Check,
-  ExternalLink,
   QrCode,
   CreditCard,
-  Sparkles,
-  ArrowRight,
+  Copy,
+  Check,
+  ShieldCheck,
+  ExternalLink,
+  CheckCircle2,
+  Loader2,
   Lock,
+  Sparkles,
   Clock,
-  BadgeCheck,
   Coins,
+  ArrowRight,
 } from 'lucide-react';
 
 interface MercadoPagoModalProps {
   isOpen: boolean;
-  plan: PricingPlan | null;
+  plan?: PricingPlan | null;
+  period?: PlanPeriod;
   creditPackage?: CreditPackage | null;
-  period: PlanPeriod;
   currentUser: UserProfile | null;
   onClose: () => void;
-  onPlanActivated: (updatedUser: Partial<UserProfile>) => void;
-  onCreditsPurchased?: (newBalance: number, creditsAdded: number) => void;
+  onPlanActivated: (updates: Partial<UserProfile>, planTitle: string) => void;
+  onCreditsPurchased?: (newBalance: number, creditsAdded: number, packageTitle: string) => void;
   onRequireAuth: () => void;
   showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
+type PaymentTab = 'pix' | 'checkout_pro';
+
 export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
   isOpen,
   plan,
-  creditPackage = null,
-  period,
+  period = 'monthly',
+  creditPackage,
   currentUser,
   onClose,
   onPlanActivated,
@@ -60,246 +66,227 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
   onRequireAuth,
   showToast,
 }) => {
-  const [paymentTab, setPaymentTab] = useState<'pix' | 'card'>('pix');
-  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<PaymentTab>('pix');
+  const [config, setConfig] = useState<MercadoPagoConfigResponse | null>(null);
+  const [loadingConfig, setLoadingConfig] = useState(false);
+
   const [pixData, setPixData] = useState<ProcessPixResponse | null>(null);
-  const [prefData, setPrefData] = useState<CreatePreferenceResponse | null>(null);
-  const [mpConfig, setMpConfig] = useState<MercadoPagoConfigResponse | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [copiedTestUser, setCopiedTestUser] = useState(false);
-  const [activating, setActivating] = useState(false);
-  const [timerSeconds, setTimerSeconds] = useState(900); // 15 minutos padrão Banco Central
-  const [completedSuccess, setCompletedSuccess] = useState(false);
-  const [creditedSummary, setCreditedSummary] = useState<{
-    added: number;
-    newBalance: number;
-    orderId: string;
-  } | null>(null);
+  const [generatingPix, setGeneratingPix] = useState(false);
+  const [copiedPix, setCopiedPix] = useState(false);
+
+  const [preferenceData, setPreferenceData] = useState<CreatePreferenceResponse | null>(null);
+  const [generatingPreference, setGeneratingPreference] = useState(false);
+
+  const [confirmingPayment, setConfirmingPayment] = useState(false);
+  const [step, setStep] = useState<'checkout' | 'success'>('checkout');
+  const [pixSecondsLeft, setPixSecondsLeft] = useState(900);
+  const [confirmedNewBalance, setConfirmedNewBalance] = useState<number | null>(null);
 
   const isCreditPurchase = Boolean(creditPackage);
 
-  const amount = creditPackage
-    ? creditPackage.price
-    : plan
-    ? period === 'yearly'
-      ? plan.yearlyTotal
-      : plan.monthlyPrice
-    : 0;
-
-  // Fecha no Escape
   useEffect(() => {
     if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+    setStep('checkout');
+    setPixData(null);
+    setPreferenceData(null);
+    setCopiedPix(false);
+    setActiveTab('pix');
+    setPixSecondsLeft(900);
+    setConfirmedNewBalance(null);
 
-  // Contagem regressiva do Pix
+    setLoadingConfig(true);
+    getMercadoPagoConfig()
+      .then((res) => setConfig(res))
+      .finally(() => setLoadingConfig(false));
+  }, [isOpen, plan?.id, period, creditPackage?.id]);
+
+  // Countdown de expiração para o QR Code Pix
   useEffect(() => {
-    if (!isOpen || paymentTab !== 'pix' || completedSuccess) return;
-    const interval = setInterval(() => {
-      setTimerSeconds((prev) => (prev > 0 ? prev - 1 : 0));
+    if (!isOpen || !pixData || step === 'success') return;
+    const timer = window.setInterval(() => {
+      setPixSecondsLeft((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
-    return () => clearInterval(interval);
-  }, [isOpen, paymentTab, completedSuccess]);
+    return () => window.clearInterval(timer);
+  }, [isOpen, pixData, step]);
 
-  // Carrega cobrança do Mercado Pago ao abrir (Reutilizado para Planos e Créditos)
+  // Polling automático a cada 5s para detectar confirmação via Webhook do Mercado Pago
   useEffect(() => {
-    if (!isOpen || (!plan && !creditPackage)) {
-      setPixData(null);
-      setPrefData(null);
-      setCompletedSuccess(false);
-      setCreditedSummary(null);
+    const activeOrderId = pixData?.orderId || preferenceData?.orderId;
+    if (!isOpen || !isCreditPurchase || !activeOrderId || !currentUser || step === 'success') {
       return;
     }
 
-    if (!currentUser) return;
-
-    let isMounted = true;
-    const loadMercadoPago = async () => {
-      setLoading(true);
-      try {
-        if (creditPackage) {
-          const [pixRes, prefRes, configRes] = await Promise.all([
-            processMercadoPagoPix({
-              type: 'credits',
-              packageId: creditPackage.id,
-              userId: currentUser.uid,
-              payerEmail: currentUser.email,
-              payerName: currentUser.name,
-              documentNumber:
-                currentUser.cnpj || currentUser.cpf || currentUser.documentNumber,
-              documentType:
-                currentUser.documentType ||
-                (currentUser.type === 'company' ? 'CNPJ' : 'CPF'),
-            }).catch(() => null),
-            createMercadoPagoPreference({
-              type: 'credits',
-              packageId: creditPackage.id,
-              userId: currentUser.uid,
-              payerEmail: currentUser.email,
-              payerName: currentUser.name,
-            }).catch(() => null),
-            getMercadoPagoConfig().catch(() => null),
-          ]);
-
-          if (isMounted) {
-            if (pixRes) setPixData(pixRes);
-            if (prefRes) setPrefData(prefRes);
-            if (configRes) setMpConfig(configRes);
-          }
-        } else if (plan) {
-          const [pixRes, prefRes, configRes] = await Promise.all([
-            processMercadoPagoPix({
-              type: 'subscription',
-              planId: plan.id,
-              planTitle: plan.title,
-              amount,
-              payerEmail: currentUser.email,
-              payerName: currentUser.name,
-              documentNumber:
-                currentUser.cpf || currentUser.cnpj || currentUser.documentNumber,
-              documentType:
-                currentUser.documentType ||
-                (plan.targetRole === 'company' ? 'CNPJ' : 'CPF'),
-            }).catch(() => null),
-            createMercadoPagoPreference({
-              type: 'subscription',
-              planId: plan.id,
-              planTitle: plan.title,
-              amount,
-              payerEmail: currentUser.email,
-              payerName: currentUser.name,
-              period,
-            }).catch(() => null),
-            getMercadoPagoConfig().catch(() => null),
-          ]);
-
-          if (isMounted) {
-            if (pixRes) setPixData(pixRes);
-            if (prefRes) setPrefData(prefRes);
-            if (configRes) setMpConfig(configRes);
-          }
-        }
-      } catch (err: any) {
-        console.error('Error generating Mercado Pago transaction:', err);
-      } finally {
-        if (isMounted) setLoading(false);
-      }
-    };
-
-    loadMercadoPago();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isOpen, plan, creditPackage, period, currentUser, amount]);
-
-  // Monitoramento automático do pedido de créditos via Webhook / API do Mercado Pago
-  useEffect(() => {
-    const activeOrderId =
-      paymentTab === 'pix' ? pixData?.orderId : prefData?.orderId || pixData?.orderId;
-    if (!isOpen || !isCreditPurchase || !currentUser || !activeOrderId || completedSuccess) {
-      return;
-    }
-
-    const pollInterval = setInterval(async () => {
-      const check = await checkCreditOrderStatus(currentUser, activeOrderId);
-      if (check.approved && typeof check.newBalance === 'number') {
-        const added = creditPackage?.totalCredits || 0;
-        setCreditedSummary({
-          added,
-          newBalance: check.newBalance,
-          orderId: activeOrderId,
-        });
-        onPlanActivated({ credits: check.newBalance });
-        onCreditsPurchased?.(check.newBalance, added);
-        setCompletedSuccess(true);
-        showToast(
-          `Pagamento confirmado pelo Mercado Pago! +${added} créditos liberados.`,
-          'success'
+    const pollInterval = window.setInterval(async () => {
+      const statusRes = await checkCreditOrderStatus(currentUser, activeOrderId);
+      if (statusRes.approved && typeof statusRes.newBalance === 'number' && creditPackage) {
+        window.clearInterval(pollInterval);
+        setConfirmedNewBalance(statusRes.newBalance);
+        onCreditsPurchased?.(
+          statusRes.newBalance,
+          creditPackage.totalCredits,
+          creditPackage.title
         );
+        setStep('success');
       }
     }, 5000);
 
-    return () => clearInterval(pollInterval);
+    return () => window.clearInterval(pollInterval);
   }, [
     isOpen,
     isCreditPurchase,
-    currentUser,
-    paymentTab,
     pixData?.orderId,
-    prefData?.orderId,
-    completedSuccess,
+    preferenceData?.orderId,
+    currentUser,
+    step,
     creditPackage,
-    onPlanActivated,
     onCreditsPurchased,
-    showToast,
   ]);
 
   if (!isOpen || (!plan && !creditPackage)) return null;
 
-  const savings = plan ? calculateSavings(plan, period) : null;
-  const dailyEquivalent = formatDailyEquivalent(amount, period);
-  const protection = plan
-    ? getPlanProtectionReason(plan.id, plan.targetRole)
-    : {
-        headline: `Adicione ${creditPackage?.totalCredits} créditos permanentes sem mensalidade`,
-        lossPrevention:
-          'Evite ficar sem saldo quando encontrar um candidato ideal. Seus créditos nunca expiram e liberam contatos imediatos.',
-        gainPoints: creditPackage?.features || [],
-      };
+  const amount = creditPackage
+    ? creditPackage.price
+    : plan
+    ? getPlanPriceForPeriod(plan, period)
+    : 0;
 
-  const handleCopyPix = () => {
-    if (!pixData?.qrCode) return;
-    navigator.clipboard.writeText(pixData.qrCode);
-    setCopied(true);
-    showToast('Código Pix copiado com sucesso! Abra o app do seu banco para colar.');
-    setTimeout(() => setCopied(false), 3000);
+  const itemTitle = creditPackage ? creditPackage.title : plan?.title || '';
+  const currentCredits = currentUser?.credits ?? 0;
+  const projectedCredits = creditPackage
+    ? currentCredits + creditPackage.totalCredits
+    : currentCredits;
+
+  const formatCountdown = (sec: number) => {
+    const mins = Math.floor(sec / 60);
+    const rem = sec % 60;
+    return `${String(mins).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
   };
 
-  const handleConfirmAndActivate = async (method: 'pix' | 'credit_card') => {
+  const handleGeneratePix = async () => {
     if (!currentUser) {
       onRequireAuth();
       return;
     }
 
     try {
-      setActivating(true);
+      setGeneratingPix(true);
+      const res = await processMercadoPagoPix({
+        type: isCreditPurchase ? 'credits' : 'subscription',
+        packageId: creditPackage?.id,
+        userId: currentUser.uid,
+        planId: plan?.id,
+        planTitle: creditPackage
+          ? `${creditPackage.title} (+${creditPackage.totalCredits} créditos)`
+          : `${plan?.title} (${PERIOD_LABELS[period]})`,
+        amount,
+        payerEmail: currentUser.email,
+        payerName: currentUser.name,
+        documentNumber: currentUser.documentNumber || currentUser.cpf || currentUser.cnpj,
+        documentType: currentUser.documentType || (currentUser.type === 'company' ? 'CNPJ' : 'CPF'),
+      });
+      setPixData(res);
+      setPixSecondsLeft(900);
+    } catch (err: any) {
+      showToast(err.message || 'Erro ao gerar cobrança Pix no Mercado Pago.', 'error');
+    } finally {
+      setGeneratingPix(false);
+    }
+  };
 
-      if (creditPackage) {
-        const orderId =
-          (method === 'pix' ? pixData?.orderId : prefData?.orderId) ||
-          pixData?.orderId ||
-          prefData?.orderId;
+  const handleCopyPixCode = async () => {
+    if (!pixData?.qrCode) return;
+    try {
+      await navigator.clipboard.writeText(pixData.qrCode);
+      setCopiedPix(true);
+      showToast('Código Pix Copia e Cola copiado!');
+      setTimeout(() => setCopiedPix(false), 3000);
+    } catch {
+      showToast('Não foi possível copiar automaticamente. Selecione o código abaixo.', 'error');
+    }
+  };
 
-        if (!orderId) {
-          showToast('Aguarde a geração do pedido no Mercado Pago.', 'error');
-          return;
+  const handleOpenCheckoutPro = async () => {
+    if (!currentUser) {
+      onRequireAuth();
+      return;
+    }
+
+    try {
+      setGeneratingPreference(true);
+      const pref = await createMercadoPagoPreference({
+        type: isCreditPurchase ? 'credits' : 'subscription',
+        packageId: creditPackage?.id,
+        userId: currentUser.uid,
+        planId: plan?.id,
+        planTitle: itemTitle,
+        amount,
+        payerEmail: currentUser.email,
+        payerName: currentUser.name,
+        period,
+      });
+      setPreferenceData(pref);
+    } catch (err: any) {
+      showToast(err.message || 'Erro ao abrir Checkout Pro do Mercado Pago.', 'error');
+    } finally {
+      setGeneratingPreference(false);
+    }
+  };
+
+  const handleConfirmPayment = async (method: 'pix' | 'credit_card') => {
+    if (!currentUser) {
+      onRequireAuth();
+      return;
+    }
+
+    try {
+      setConfirmingPayment(true);
+
+      if (isCreditPurchase && creditPackage) {
+        let targetOrderId = pixData?.orderId || preferenceData?.orderId;
+
+        if (!targetOrderId) {
+          if (method === 'pix') {
+            const generated = await processMercadoPagoPix({
+              type: 'credits',
+              packageId: creditPackage.id,
+              userId: currentUser.uid,
+              payerEmail: currentUser.email,
+              payerName: currentUser.name,
+            });
+            setPixData(generated);
+            targetOrderId = generated.orderId;
+          } else {
+            const generatedPref = await createMercadoPagoPreference({
+              type: 'credits',
+              packageId: creditPackage.id,
+              userId: currentUser.uid,
+              payerEmail: currentUser.email,
+              payerName: currentUser.name,
+            });
+            setPreferenceData(generatedPref);
+            targetOrderId = generatedPref.orderId;
+          }
         }
 
-        const paymentId = method === 'pix' ? pixData?.id : prefData?.id;
-        const result = await confirmAndCreditOrder(currentUser, orderId, paymentId);
+        if (!targetOrderId) {
+          throw new Error('Pedido de créditos não identificado.');
+        }
 
-        setCreditedSummary({
-          added: creditPackage.totalCredits,
-          newBalance: result.newBalance,
-          orderId,
-        });
-        onPlanActivated({ credits: result.newBalance });
-        onCreditsPurchased?.(result.newBalance, creditPackage.totalCredits);
-        setCompletedSuccess(true);
+        const result = await confirmAndCreditOrder(
+          currentUser,
+          targetOrderId,
+          pixData?.id || preferenceData?.id
+        );
+
+        setConfirmedNewBalance(result.newBalance);
 
         if (result.alreadyProcessed) {
-          showToast('Este pedido já havia sido creditado anteriormente (proteção contra duplicidade ativa).');
+          showToast('Este pedido já havia sido creditado anteriormente (Sem duplicidade).');
         } else {
-          showToast(
-            `+${creditPackage.totalCredits} créditos adicionados! Novo saldo: ${result.newBalance} créditos.`,
-            'success'
-          );
+          onCreditsPurchased?.(result.newBalance, result.creditsAdded, creditPackage.title);
         }
+
+        setStep('success');
         return;
       }
 
@@ -309,500 +296,475 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
           plan,
           period,
           method,
-          pixData?.id || prefData?.id
+          pixData?.id || preferenceData?.id
         );
-        onPlanActivated(updates);
-        setCompletedSuccess(true);
-        showToast(`Plano ${plan.title} ativado com sucesso!`, 'success');
+        setStep('success');
+        onPlanActivated(updates, plan.title);
       }
     } catch (err: any) {
-      showToast(err.message || 'Erro ao confirmar pagamento. Tente novamente.', 'error');
+      showToast(err.message || 'Erro ao confirmar pagamento.', 'error');
     } finally {
-      setActivating(false);
+      setConfirmingPayment(false);
     }
   };
 
-  const minutes = Math.floor(timerSeconds / 60);
-  const seconds = timerSeconds % 60;
-  const formattedTimer = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  const checkoutUrl = preferenceData?.sandboxInitPoint || preferenceData?.initPoint;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-      <div
-        className="absolute inset-0 bg-[#0B1F3A]/75 backdrop-blur-xs transition-opacity"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="mp-modal-title"
-        className="modal-surface w-full max-w-[620px] max-h-[92vh] overflow-y-auto relative z-10 rounded-2xl bg-white shadow-2xl border border-[#CBD5E1]"
-      >
-        {/* Step Indicator */}
-        <div className="px-6 pt-5 pb-3 border-b border-[#E2E8F0] bg-[#F8FAFC] rounded-t-2xl">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#009EE3] flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5" />
-                Mercado Pago Checkout Seguro
-              </span>
-              <span className="text-slate-300">|</span>
-              <span className="text-[11px] text-[#16835D] font-semibold flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Compra Garantida
-              </span>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-xs overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="mp-checkout-title"
+    >
+      <div className="bg-white border border-[#DBEAFE] rounded-2xl max-w-lg w-full overflow-hidden shadow-2xl my-auto">
+        {/* Top Header */}
+        <div className="bg-gradient-to-r from-[#1E3A8A] via-[#1E40AF] to-[#2563EB] px-6 py-4 text-white flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center font-extrabold text-sm tracking-tight shrink-0">
+              MP
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Fechar janela de pagamento"
-              className="w-8 h-8 inline-flex items-center justify-center text-[#64748B] hover:text-[#0F172A] rounded-lg hover:bg-[#E2E8F0] transition-colors cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Stepped Breadcrumb */}
-          <div className="grid grid-cols-3 gap-2 mt-3 pt-2 border-t border-[#E2E8F0]">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#16835D]">
-              <span className="w-5 h-5 rounded-full bg-[#ECFDF5] border border-[#16835D] text-[#16835D] flex items-center justify-center text-[10px]">
-                ✓
-              </span>
-              <span className="truncate">
-                {isCreditPurchase ? '1. Pacote Escolhido' : '1. Plano Escolhido'}
-              </span>
-            </div>
-            <div className={`flex items-center gap-1.5 text-[11px] font-bold ${completedSuccess ? 'text-[#16835D]' : 'text-[#009EE3]'}`}>
-              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${completedSuccess ? 'bg-[#ECFDF5] border border-[#16835D] text-[#16835D]' : 'bg-[#EFF6FF] border border-[#009EE3] text-[#009EE3]'}`}>
-                {completedSuccess ? '✓' : '2'}
-              </span>
-              <span className="truncate">2. Pagamento Seguro</span>
-            </div>
-            <div className={`flex items-center gap-1.5 text-[11px] ${completedSuccess ? 'font-bold text-[#16835D]' : 'font-medium text-[#94A3B8]'}`}>
-              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] ${completedSuccess ? 'bg-[#16835D] text-white font-bold' : 'bg-[#F1F5F9] border border-[#CBD5E1] text-[#94A3B8]'}`}>
-                3
-              </span>
-              <span className="truncate">
-                {isCreditPurchase ? '3. Créditos na Carteira' : '3. Benefícios Ativos'}
-              </span>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <h2 id="mp-checkout-title" className="text-[15px] font-bold leading-tight">
+                  Checkout Seguro Mercado Pago
+                </h2>
+                <Lock className="w-3.5 h-3.5 text-emerald-300" />
+              </div>
+              <p className="text-[11px] text-blue-100">
+                {loadingConfig
+                  ? 'Conectando ao gateway...'
+                  : config?.configured
+                  ? 'Conexão Oficial Criptografada (SSL)'
+                  : 'Ambiente Homologado · Liberação Instantânea'}
+              </p>
             </div>
           </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar checkout"
+            className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
-        {/* CELEBRATION SUCCESS STATE */}
-        {completedSuccess ? (
-          <div className="p-8 text-center space-y-6">
-            <div className="w-16 h-16 rounded-2xl bg-[#ECFDF5] border-2 border-[#16835D] text-[#16835D] flex items-center justify-center mx-auto shadow-sm">
-              <CheckCircle2 className="w-10 h-10" />
+        {step === 'success' ? (
+          <div className="p-6 sm:p-8 text-center space-y-5">
+            <div className="w-14 h-14 rounded-2xl bg-[#ECFDF5] border border-[#A7F3D0] text-[#059669] flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-8 h-8" />
             </div>
 
-            {isCreditPurchase && creditPackage ? (
-              <div className="space-y-2">
-                <span className="text-[12px] font-bold uppercase tracking-wider text-[#16835D] bg-[#ECFDF5] px-3 py-1 rounded-full border border-[#BBF7D0]">
-                  Créditos Liberados com Sucesso
-                </span>
-                <h2 className="text-[22px] font-bold text-[#0F172A] tracking-tight">
-                  +{creditPackage.totalCredits} créditos foram adicionados à sua carteira!
-                </h2>
-                <p className="text-[14px] text-[#64748B] max-w-md mx-auto leading-relaxed">
-                  Seu novo saldo disponível é de{' '}
-                  <strong className="text-[#0F172A]">
-                    {creditedSummary?.newBalance ?? (currentUser?.credits ?? 5)} créditos
-                  </strong>
-                  . Pedido registrado com proteção contra duplicidade ({creditedSummary?.orderId}).
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <span className="text-[12px] font-bold uppercase tracking-wider text-[#16835D] bg-[#ECFDF5] px-3 py-1 rounded-full border border-[#BBF7D0]">
-                  Assinatura Confirmada
-                </span>
-                <h2 className="text-[22px] font-bold text-[#0F172A] tracking-tight">
-                  Parabéns! O plano {plan?.title} já está ativo na sua conta.
-                </h2>
-                <p className="text-[14px] text-[#64748B] max-w-md mx-auto leading-relaxed">
-                  Seus benefícios foram liberados imediatamente sem burocracia. Um comprovante detalhado foi registrado com garantia de 7 dias.
-                </p>
+            <div className="space-y-1.5">
+              <span className="inline-block text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-[#ECFDF5] text-[#059669]">
+                Pagamento Confirmado
+              </span>
+              <h3 className="text-[22px] font-extrabold text-[#0F172A]">
+                {isCreditPurchase && creditPackage
+                  ? `+${creditPackage.totalCredits} créditos liberados!`
+                  : `${itemTitle} ativado com sucesso!`}
+              </h3>
+              <p className="text-[13px] text-[#475569] max-w-sm mx-auto">
+                {isCreditPurchase
+                  ? 'Seus créditos já foram adicionados à sua carteira digital e não possuem prazo de validade.'
+                  : 'Os recursos do seu plano já estão disponíveis na sua conta.'}
+              </p>
+            </div>
+
+            {isCreditPurchase && creditPackage && (
+              <div className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl p-4 text-left space-y-2 text-[13px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[#64748B]">Pacote adquirido</span>
+                  <span className="font-bold text-[#0F172A]">{creditPackage.title}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[#64748B]">Créditos adicionados</span>
+                  <span className="font-extrabold text-[#059669]">
+                    +{creditPackage.totalCredits} créditos
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-[#E2E8F0]">
+                  <span className="font-semibold text-[#0F172A]">Saldo disponível na carteira</span>
+                  <span className="text-[15px] font-extrabold text-[#1E40AF] tabular-nums">
+                    {confirmedNewBalance ?? projectedCredits} créditos
+                  </span>
+                </div>
               </div>
             )}
 
-            {/* Unlocked Superpowers Card */}
-            <div className="p-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl text-left space-y-2.5">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-[#475569] block">
-                {isCreditPurchase
-                  ? 'Resumo da Transação Auditável:'
-                  : 'Superpoderes Ativados no seu Perfil:'}
-              </span>
-              <ul className="space-y-1.5 text-[13px] text-[#0F172A]">
-                {protection.gainPoints.map((point, idx) => (
-                  <li key={idx} className="flex items-start gap-2">
-                    <BadgeCheck className="w-4 h-4 text-[#16835D] shrink-0 mt-0.5" />
-                    <span>{point}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
             <button
               type="button"
+              data-testid="mp-finish-btn"
               onClick={onClose}
-              className="btn-base btn-lg btn-primary w-full shadow-md flex items-center justify-center gap-2 cursor-pointer font-semibold"
+              className="w-full min-h-[46px] rounded-xl bg-[#1E40AF] hover:bg-[#1E3A8A] text-white font-bold text-[14px] transition-colors cursor-pointer"
             >
-              <span>
-                {isCreditPurchase
-                  ? 'Voltar ao Painel com Meu Novo Saldo'
-                  : 'Acessar Meu Painel e Usar os Benefícios'}
-              </span>
-              <ArrowRight className="w-4 h-4" />
+              Concluir e Continuar
             </button>
           </div>
         ) : (
-          <div>
-            {/* Not Logged In Warning */}
+          <div className="p-5 sm:p-6 space-y-5">
+            {/* 1. Resumo Limpo do Pedido e Saldo */}
+            <div className="bg-[#F8FAFC] border border-[#DBEAFE] rounded-xl p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#2563EB] block">
+                    {isCreditPurchase ? 'Recarga Avulsa de Créditos' : 'Assinatura'}
+                  </span>
+                  <h3 className="text-[17px] font-extrabold text-[#0F172A] leading-snug mt-0.5">
+                    {itemTitle}
+                  </h3>
+                  <p className="text-[12px] text-[#64748B]">
+                    {isCreditPurchase
+                      ? 'Pagamento único · Créditos sem data de expiração'
+                      : `Ciclo ${PERIOD_LABELS[period]}`}
+                  </p>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <span className="text-[11px] font-semibold text-[#64748B] block">Total</span>
+                  <span className="text-[22px] font-extrabold text-[#0F172A] tabular-nums leading-none">
+                    {formatPriceBRL(amount)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Simulação de Saldo Atual -> Novo Saldo */}
+              {isCreditPurchase && creditPackage && currentUser && (
+                <div className="pt-3 border-t border-[#E2E8F0] flex items-center justify-between text-[12px]">
+                  <div className="flex items-center gap-1.5 text-[#475569]">
+                    <Coins className="w-3.5 h-3.5 text-[#2563EB]" />
+                    <span>Saldo na carteira:</span>
+                  </div>
+                  <div className="flex items-center gap-2 font-bold tabular-nums">
+                    <span className="text-[#64748B]">{currentCredits} cr</span>
+                    <ArrowRight className="w-3.5 h-3.5 text-[#2563EB]" />
+                    <span className="text-[#059669] bg-[#ECFDF5] px-2 py-0.5 rounded-md border border-[#A7F3D0]">
+                      {projectedCredits} créditos (+{creditPackage.totalCredits})
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Aviso caso usuário não esteja autenticado */}
             {!currentUser && (
-              <div className="p-6 bg-[#EFF6FF] border-b border-[#BFDBFE] text-center space-y-3">
-                <p className="text-[14px] text-[#1E3A8A] font-medium leading-relaxed">
-                  Para vincular a compra à sua conta e carteira de créditos, entre na sua conta ou cadastre-se gratuitamente em 1 minuto.
+              <div className="p-3.5 rounded-xl bg-[#FEF3C7] border border-[#FDE68A] flex items-center justify-between gap-3">
+                <p className="text-[12px] text-[#92400E] font-medium">
+                  Entre ou crie sua conta gratuita para vincular os créditos à sua carteira.
                 </p>
                 <button
                   type="button"
-                  onClick={() => {
-                    onClose();
-                    onRequireAuth();
-                  }}
-                  className="btn-base btn-md btn-primary w-full shadow-sm"
+                  onClick={onRequireAuth}
+                  className="px-3 py-1.5 rounded-lg bg-[#92400E] text-white text-[12px] font-bold shrink-0 cursor-pointer"
                 >
-                  Entrar ou Criar Conta Gratuita
+                  Entrar / Cadastrar
                 </button>
               </div>
             )}
 
-            {currentUser && (
-              <div className="p-6 space-y-6">
-                {/* Order Summary with Anchoring */}
-                <div className="p-4 rounded-xl bg-[#F8FAFC] border border-[#CBD5E1] space-y-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 id="mp-modal-title" className="text-[18px] font-bold text-[#0F172A]">
-                          {creditPackage ? creditPackage.title : plan?.title}
-                        </h3>
-                        <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-[#EFF6FF] text-[#009EE3] border border-[#BFDBFE]">
-                          {creditPackage
-                            ? `${creditPackage.totalCredits} Créditos Avulsos`
-                            : period === 'yearly'
-                            ? 'Ciclo Anual'
-                            : 'Ciclo Mensal'}
-                        </span>
-                      </div>
-                      <p className="text-[12px] text-[#64748B] mt-0.5">
-                        {creditPackage
-                          ? `Pedido vinculado a ${currentUser.name} · Saldo atual: ${currentUser.credits ?? 5} créditos`
-                          : plan?.targetRole === 'company'
-                          ? 'Para Recrutadores e Empresas (CNPJ)'
-                          : 'Para Candidatos e Profissionais (CPF)'}
+            {/* 2. Seletor de Método de Pagamento */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-[#F1F5F9] rounded-xl">
+              <button
+                type="button"
+                data-testid="mp-tab-pix"
+                onClick={() => setActiveTab('pix')}
+                className={`py-2.5 px-3 rounded-lg text-[13px] font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  activeTab === 'pix'
+                    ? 'bg-white text-[#1E40AF] shadow-xs'
+                    : 'text-[#475569] hover:text-[#0F172A]'
+                }`}
+              >
+                <QrCode className="w-4 h-4 text-[#009EE3]" />
+                <span>Pix Imediato</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="mp-tab-card"
+                onClick={() => setActiveTab('checkout_pro')}
+                className={`py-2.5 px-3 rounded-lg text-[13px] font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  activeTab === 'checkout_pro'
+                    ? 'bg-white text-[#1E40AF] shadow-xs'
+                    : 'text-[#475569] hover:text-[#0F172A]'
+                }`}
+              >
+                <CreditCard className="w-4 h-4 text-[#2563EB]" />
+                <span>Cartão (Até 12x)</span>
+              </button>
+            </div>
+
+            {/* 3. Conteúdo da Aba Pix */}
+            {activeTab === 'pix' && (
+              <div className="space-y-4">
+                {!pixData ? (
+                  <div className="border border-[#E2E8F0] rounded-xl p-5 text-center space-y-4">
+                    <div className="w-12 h-12 rounded-2xl bg-[#EFF6FF] text-[#009EE3] flex items-center justify-center mx-auto">
+                      <QrCode className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-1">
+                      <h4 className="text-[15px] font-bold text-[#0F172A]">
+                        Pagamento Instantâneo via Pix
+                      </h4>
+                      <p className="text-[12px] text-[#64748B] max-w-xs mx-auto">
+                        Gere o QR Code ou código Pix Copia e Cola. Seus créditos são liberados assim que o pagamento é confirmado.
                       </p>
                     </div>
-
-                    {/* Price & Daily Equivalent Anchor */}
-                    <div className="text-right">
-                      {creditPackage ? (
-                        <div className="text-[12px] text-[#94A3B8] line-through tabular-nums">
-                          {formatPriceBRL(creditPackage.originalPrice)}
-                        </div>
+                    <button
+                      type="button"
+                      data-testid="mp-generate-pix-btn"
+                      onClick={handleGeneratePix}
+                      disabled={generatingPix}
+                      className="w-full min-h-[46px] rounded-xl bg-[#009EE3] hover:bg-[#0086C3] text-white font-bold text-[14px] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      {generatingPix ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Gerando QR Code Pix...</span>
+                        </>
                       ) : (
-                        savings &&
-                        savings.savingsTotal > 0 && (
-                          <div className="text-[12px] text-[#94A3B8] line-through tabular-nums">
-                            {formatPriceBRL(savings.originalTotal)}
-                          </div>
-                        )
+                        <>
+                          <QrCode className="w-4 h-4" />
+                          <span>Gerar QR Code Pix ({formatPriceBRL(amount)})</span>
+                        </>
                       )}
-                      <div className="text-[22px] font-extrabold text-[#0F172A] tabular-nums leading-tight">
-                        {formatPriceBRL(amount)}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="border border-[#DBEAFE] rounded-xl p-4 space-y-4 bg-[#F8FAFC]/60">
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span className="font-bold text-[#059669] flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        QR Code Pix pronto para pagamento
+                      </span>
+                      <span className="inline-flex items-center gap-1 font-mono font-bold text-[#475569] bg-white px-2 py-0.5 rounded border border-[#E2E8F0]">
+                        <Clock className="w-3 h-3 text-[#2563EB]" />
+                        {formatCountdown(pixSecondsLeft)}
+                      </span>
+                    </div>
+
+                    {/* QR Code Visual */}
+                    <div className="flex flex-col sm:flex-row items-center gap-4 bg-white p-4 rounded-xl border border-[#E2E8F0]">
+                      <div className="p-2 bg-white border border-[#E2E8F0] rounded-xl shrink-0">
+                        {pixData.qrCodeBase64 ? (
+                          <img
+                            src={`data:image/png;base64,${pixData.qrCodeBase64}`}
+                            alt="QR Code Pix Mercado Pago"
+                            className="w-32 h-32 object-contain"
+                          />
+                        ) : (
+                          <svg
+                            viewBox="0 0 120 120"
+                            className="w-32 h-32 text-slate-900"
+                            aria-label="QR Code Pix"
+                          >
+                            <rect width="120" height="120" fill="white" />
+                            <rect
+                              x="8"
+                              y="8"
+                              width="30"
+                              height="30"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="6"
+                            />
+                            <rect x="17" y="17" width="12" height="12" fill="currentColor" />
+                            <rect
+                              x="82"
+                              y="8"
+                              width="30"
+                              height="30"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="6"
+                            />
+                            <rect x="91" y="17" width="12" height="12" fill="currentColor" />
+                            <rect
+                              x="8"
+                              y="82"
+                              width="30"
+                              height="30"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="6"
+                            />
+                            <rect x="17" y="91" width="12" height="12" fill="currentColor" />
+                            <rect x="46" y="12" width="6" height="6" fill="currentColor" />
+                            <rect x="58" y="12" width="12" height="6" fill="currentColor" />
+                            <rect x="46" y="24" width="12" height="6" fill="currentColor" />
+                            <rect x="64" y="24" width="6" height="12" fill="currentColor" />
+                            <rect x="12" y="46" width="12" height="6" fill="currentColor" />
+                            <rect x="30" y="46" width="6" height="12" fill="currentColor" />
+                            <rect x="46" y="46" width="24" height="24" fill="#009EE3" rx="4" />
+                            <text
+                              x="58"
+                              y="62"
+                              textAnchor="middle"
+                              fill="white"
+                              fontSize="10"
+                              fontWeight="bold"
+                            >
+                              PIX
+                            </text>
+                            <rect x="78" y="46" width="12" height="6" fill="currentColor" />
+                            <rect x="96" y="52" width="12" height="12" fill="currentColor" />
+                            <rect x="46" y="78" width="12" height="6" fill="currentColor" />
+                            <rect x="64" y="84" width="18" height="6" fill="currentColor" />
+                            <rect x="88" y="78" width="18" height="12" fill="currentColor" />
+                            <rect x="46" y="96" width="18" height="12" fill="currentColor" />
+                            <rect x="76" y="96" width="32" height="12" fill="currentColor" />
+                          </svg>
+                        )}
                       </div>
-                      <div className="text-[11px] text-[#16835D] font-bold tabular-nums">
-                        {creditPackage
-                          ? `Apenas ${formatPriceBRL(creditPackage.costPerCredit)} por crédito`
-                          : `Equivalente a apenas ${dailyEquivalent}`}
+
+                      <div className="flex-1 space-y-2.5 w-full">
+                        <div className="text-[12px] text-[#475569] leading-relaxed">
+                          Escaneie o QR Code no aplicativo do seu banco ou copie o código abaixo:
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            readOnly
+                            value={pixData.qrCode}
+                            aria-label="Código Pix Copia e Cola"
+                            className="flex-1 text-[11px] font-mono bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-2.5 py-2 text-[#334155] select-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleCopyPixCode}
+                            className="px-3 py-2 rounded-lg bg-[#EFF6FF] hover:bg-[#DBEAFE] text-[#1E40AF] font-bold text-[12px] inline-flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer"
+                          >
+                            {copiedPix ? (
+                              <>
+                                <Check className="w-3.5 h-3.5 text-[#059669]" />
+                                <span className="text-[#059669]">Copiado</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5" />
+                                <span>Copiar</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Protection and Value Microcopy */}
-                  <div className="pt-2 border-t border-[#E2E8F0] flex items-center justify-between text-[11px]">
-                    <span className="text-[#64748B] flex items-center gap-1">
-                      {creditPackage ? (
+                    <button
+                      type="button"
+                      data-testid="mp-confirm-pix-btn"
+                      onClick={() => handleConfirmPayment('pix')}
+                      disabled={confirmingPayment}
+                      className="w-full min-h-[46px] rounded-xl bg-[#059669] hover:bg-[#047857] text-white font-bold text-[14px] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      {confirmingPayment ? (
                         <>
-                          <Coins className="w-3.5 h-3.5 text-[#009EE3]" />
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Validando pagamento e liberando créditos...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
                           <span>
-                            Créditos sem prazo de validade · Pedido:{' '}
-                            <strong className="font-mono text-[#0F172A]">
-                              {pixData?.orderId || prefData?.orderId || 'gerando...'}
-                            </strong>
+                            {isCreditPurchase && creditPackage
+                              ? `Já paguei · Liberar +${creditPackage.totalCredits} Créditos`
+                              : 'Confirmar Pagamento Pix'}
                           </span>
                         </>
-                      ) : period === 'yearly' ? (
-                        'Economia garantida de até 25% no ciclo anual'
-                      ) : (
-                        'Sem contrato de permanência mínima'
                       )}
-                    </span>
-                    <span className="font-semibold text-[#16835D] bg-[#ECFDF5] px-2 py-0.5 rounded">
-                      Taxas extras: R$ 0,00
-                    </span>
+                    </button>
                   </div>
-                </div>
+                )}
+              </div>
+            )}
 
-                {/* Gain & Loss Prevention Box */}
-                <div className="p-3.5 bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl space-y-1.5">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#1E40AF] block">
-                    Por que este investimento vale a pena agora:
-                  </span>
-                  <p className="text-[13px] text-[#1E3A8A] font-medium leading-relaxed">
-                    {protection.headline}. {protection.lossPrevention}
+            {/* 4. Conteúdo da Aba Cartão / Checkout Pro */}
+            {activeTab === 'checkout_pro' && (
+              <div className="border border-[#E2E8F0] rounded-xl p-5 space-y-4">
+                <div className="space-y-1 text-center">
+                  <div className="w-11 h-11 rounded-2xl bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center mx-auto mb-2">
+                    <CreditCard className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-[15px] font-bold text-[#0F172A]">
+                    Cartão de Crédito ou Saldo Mercado Pago
+                  </h4>
+                  <p className="text-[12px] text-[#64748B] max-w-xs mx-auto">
+                    Pague com qualquer cartão em até 12x no ambiente criptografado do Mercado Pago.
                   </p>
                 </div>
 
-                {/* Method Selection */}
-                <div className="space-y-3">
-                  <label className="text-[12px] font-bold uppercase tracking-wider text-[#475569] block">
-                    Selecione a Forma de Pagamento no Mercado Pago:
-                  </label>
-
-                  <div className="grid grid-cols-2 gap-2.5 p-1 bg-[#F1F5F9] rounded-xl border border-[#E2E8F0]">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentTab('pix')}
-                      className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px] font-semibold transition-all cursor-pointer ${
-                        paymentTab === 'pix'
-                          ? 'bg-white text-[#009EE3] shadow-xs border border-[#CBD5E1]'
-                          : 'text-[#64748B] hover:text-[#0F172A]'
-                      }`}
-                    >
-                      <QrCode className="w-4 h-4" />
-                      <span>Pix Instantâneo</span>
-                      <span className="text-[10px] bg-[#ECFDF5] text-[#16835D] font-bold px-1.5 py-0.2 rounded-sm">
-                        Liberação Imediata
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPaymentTab('card')}
-                      className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-[13px] font-semibold transition-all cursor-pointer ${
-                        paymentTab === 'card'
-                          ? 'bg-white text-[#009EE3] shadow-xs border border-[#CBD5E1]'
-                          : 'text-[#64748B] hover:text-[#0F172A]'
-                      }`}
-                    >
-                      <CreditCard className="w-4 h-4" />
-                      <span>Cartão ou Checkout Pro</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* PIX CONTENT (Cap. 3 - 1-Clique & Cashless) */}
-                {paymentTab === 'pix' && (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex flex-col sm:flex-row items-center gap-4">
-                      {/* Stylized Central Bank / Mercado Pago QR Preview */}
-                      <div className="w-36 h-36 bg-white p-2.5 rounded-xl border border-[#CBD5E1] shadow-xs flex flex-col items-center justify-center shrink-0">
-                        <svg viewBox="0 0 100 100" className="w-full h-full text-[#0B1F3A]">
-                          <rect x="5" y="5" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="5" />
-                          <rect x="12" y="12" width="14" height="14" fill="currentColor" />
-                          <rect x="67" y="5" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="5" />
-                          <rect x="74" y="12" width="14" height="14" fill="currentColor" />
-                          <rect x="5" y="67" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="5" />
-                          <rect x="12" y="74" width="14" height="14" fill="currentColor" />
-                          <rect x="42" y="10" width="16" height="6" fill="currentColor" />
-                          <rect x="42" y="24" width="10" height="8" fill="currentColor" />
-                          <rect x="10" y="44" width="12" height="12" fill="currentColor" />
-                          <rect x="30" y="44" width="14" height="6" fill="currentColor" />
-                          <rect x="50" y="42" width="18" height="18" fill="currentColor" />
-                          <rect x="74" y="44" width="16" height="12" fill="currentColor" />
-                          <rect x="42" y="70" width="14" height="12" fill="currentColor" />
-                          <rect x="64" y="72" width="18" height="18" fill="currentColor" />
-                        </svg>
-                        <span className="text-[10px] font-bold text-[#009EE3] mt-1 tracking-wider uppercase">
-                          Mercado Pago Pix
-                        </span>
-                      </div>
-
-                      <div className="min-w-0 flex-1 space-y-1.5 text-center sm:text-left">
-                        <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#16835D] bg-[#ECFDF5] px-2.5 py-1 rounded-md">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Aprovação Automática em Segundos</span>
-                        </div>
-                        <h4 className="text-[15px] font-semibold text-[#0F172A]">
-                          Abra o app do seu banco e escaneie o QR Code
-                        </h4>
-                        <p className="text-[12px] text-[#64748B] leading-relaxed">
-                          Ou utilize a chave Copia e Cola abaixo. O sistema do Mercado Pago identifica a compensação na hora.
-                        </p>
-                        <div className="flex items-center gap-1.5 text-[12px] text-[#D97706] font-semibold tabular-nums">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span>Código válido por: <strong>{formattedTimer}</strong></span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Copia e Cola with 1-Click Copy */}
-                    <div>
-                      <label className="text-[12px] font-semibold text-[#475569] mb-1.5 flex items-center justify-between">
-                        <span>Código Pix Copia e Cola Oficial:</span>
-                        <span className="text-[11px] text-[#64748B] font-normal">Clique para copiar em 1 segundo</span>
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          readOnly
-                          value={pixData?.qrCode || 'Gerando código Pix Mercado Pago...'}
-                          className="form-control text-xs font-mono bg-[#F8FAFC] py-2.5 truncate text-[#334155] select-all cursor-pointer"
-                          onClick={handleCopyPix}
-                        />
-                        <button
-                          type="button"
-                          onClick={handleCopyPix}
-                          disabled={loading || !pixData?.qrCode}
-                          className="btn-base btn-md btn-secondary shrink-0 gap-1.5 text-[13px] font-semibold cursor-pointer shadow-xs"
-                        >
-                          {copied ? <Check className="w-4 h-4 text-[#16835D]" /> : <Copy className="w-4 h-4" />}
-                          <span>{copied ? 'Copiado!' : 'Copiar Pix'}</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* 1-Click Instant Activation (Cap. 3 & Cap. 8) */}
-                    <div className="pt-2">
-                      <button
-                        type="button"
-                        onClick={() => handleConfirmAndActivate('pix')}
-                        disabled={activating}
-                        className="w-full btn-base btn-lg bg-[#009EE3] hover:bg-[#0086C3] text-white font-bold shadow-md flex items-center justify-center gap-2 cursor-pointer transition-transform active:scale-[0.99]"
-                      >
-                        <Sparkles className="w-5 h-5" />
-                        <span>
-                          {activating
-                            ? 'Validando pagamento no Mercado Pago...'
-                            : isCreditPurchase
-                            ? `Confirmar Pagamento e Liberar +${creditPackage?.totalCredits} Créditos Agora`
-                            : 'Confirmar Pagamento e Ativar Plano Agora'}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* CARD & CHECKOUT PRO CONTENT */}
-                {paymentTab === 'card' && (
-                  <div className="space-y-4">
-                    <div className="p-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[14px] font-bold text-[#0F172A]">
-                          Checkout Pro Oficial do Mercado Pago
-                        </span>
-                      </div>
-                      <p className="text-[13px] text-[#64748B] leading-relaxed">
-                        Pague em até 12x no cartão de crédito (todas as bandeiras) ou utilize seu saldo em conta do Mercado Pago com total segurança.
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-2 pt-1 text-[12px] text-[#475569]">
-                        <span className="px-2 py-0.5 rounded bg-white border border-[#CBD5E1] font-semibold">Visa</span>
-                        <span className="px-2 py-0.5 rounded bg-white border border-[#CBD5E1] font-semibold">Mastercard</span>
-                        <span className="px-2 py-0.5 rounded bg-white border border-[#CBD5E1] font-semibold">Elo</span>
-                        <span className="px-2 py-0.5 rounded bg-white border border-[#CBD5E1] font-semibold">Hipercard</span>
-                        <span className="px-2 py-0.5 rounded bg-[#EFF6FF] text-[#009EE3] border border-[#BFDBFE] font-semibold">
-                          Saldo Mercado Pago
-                        </span>
-                      </div>
-                    </div>
-
-                    {prefData?.initPoint && (
-                      <div className="space-y-3">
-                        <a
-                          href={prefData.initPoint}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="w-full btn-base btn-lg bg-[#009EE3] hover:bg-[#0086C3] text-white font-bold shadow-md flex items-center justify-center gap-2"
-                        >
-                          <ExternalLink className="w-5 h-5" />
-                          <span>Abrir Tela Segura de Pagamento Mercado Pago</span>
-                        </a>
-
-                        {/* Test credentials helper */}
-                        {mpConfig?.testUser && (
-                          <div className="p-3 bg-[#F0FDF4] border border-[#BBF7D0] rounded-xl text-left space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-bold uppercase tracking-wider text-[#16835D]">
-                                Conta de Teste do Mercado Pago (para simular no checkout):
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(`${mpConfig.testUser}`);
-                                  setCopiedTestUser(true);
-                                  showToast('Usuário de teste copiado!');
-                                  setTimeout(() => setCopiedTestUser(false), 2000);
-                                }}
-                                className="text-[11px] text-[#16835D] font-semibold hover:underline cursor-pointer flex items-center gap-1"
-                              >
-                                {copiedTestUser ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                                {copiedTestUser ? 'Copiado!' : 'Copiar Login'}
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[12px] font-mono text-[#1E293B]">
-                              <div>
-                                <span className="text-[#64748B] font-sans font-medium text-[11px]">Usuário: </span>
-                                <strong className="text-[#0F172A]">{mpConfig.testUser}</strong>
-                              </div>
-                              <div>
-                                <span className="text-[#64748B] font-sans font-medium text-[11px]">Senha: </span>
-                                <strong className="text-[#0F172A]">{mpConfig.testPass || '******'}</strong>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() => handleConfirmAndActivate('credit_card')}
-                          disabled={activating}
-                          className="w-full btn-base btn-md btn-secondary font-semibold flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                        >
-                          <CheckCircle2 className="w-4 h-4 text-[#16835D]" />
-                          <span>
-                            {activating
-                              ? 'Validando...'
-                              : isCreditPurchase
-                              ? `Confirmar e Creditar +${creditPackage?.totalCredits} Créditos na Carteira`
-                              : 'Confirmar e Liberar Benefícios Imediatamente'}
-                          </span>
-                        </button>
-                      </div>
+                {!preferenceData ? (
+                  <button
+                    type="button"
+                    data-testid="mp-generate-pref-btn"
+                    onClick={handleOpenCheckoutPro}
+                    disabled={generatingPreference}
+                    className="w-full min-h-[46px] rounded-xl bg-[#1E40AF] hover:bg-[#1E3A8A] text-white font-bold text-[14px] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {generatingPreference ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Preparando Checkout Seguro...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard className="w-4 h-4" />
+                        <span>Pagar com Cartão ({formatPriceBRL(amount)})</span>
+                      </>
                     )}
+                  </button>
+                ) : (
+                  <div className="space-y-3 pt-1">
+                    {checkoutUrl && (
+                      <a
+                        href={checkoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full min-h-[44px] rounded-xl bg-[#009EE3] hover:bg-[#0086C3] text-white font-bold text-[13px] flex items-center justify-center gap-2 transition-colors"
+                      >
+                        <span>Abrir Página do Mercado Pago</span>
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                    )}
+
+                    <button
+                      type="button"
+                      data-testid="mp-confirm-card-btn"
+                      onClick={() => handleConfirmPayment('credit_card')}
+                      disabled={confirmingPayment}
+                      className="w-full min-h-[46px] rounded-xl bg-[#059669] hover:bg-[#047857] text-white font-bold text-[14px] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      {confirmingPayment ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Confirmando e creditando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>
+                            {isCreditPurchase && creditPackage
+                              ? `Confirmar Aprovação (+${creditPackage.totalCredits} Créditos)`
+                              : 'Confirmar Pagamento por Cartão'}
+                          </span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 )}
-
-                {/* Risk-Reversal & Trust Architecture (Cap. 2 - Aversão à Perda & Cap. 9 - Ética) */}
-                <div className="pt-4 border-t border-[#E2E8F0] space-y-2">
-                  <div className="p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-xl flex items-center gap-3">
-                    <ShieldCheck className="w-6 h-6 text-[#16835D] shrink-0" />
-                    <div className="text-[12px] text-[#334155] leading-relaxed">
-                      <strong className="text-[#0F172A]">Garantia Incondicional de 7 Dias:</strong> Se por qualquer motivo você não ficar 100% satisfeito com o resultado, devolvemos seu dinheiro integralmente com 1 clique no painel. Sem letras miúdas.
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] text-[#64748B]">
-                    <span>· Sem fidelidade ou permanência obrigatória</span>
-                    <span>· Cancele quando quiser com 1 clique</span>
-                    <span>· Mercado Pago Compra Garantida</span>
-                  </div>
-                </div>
               </div>
             )}
+
+            {/* Rodapé enxuto de segurança */}
+            <div className="pt-2 border-t border-[#F1F5F9] flex items-center justify-between text-[11px] text-[#64748B]">
+              <span className="inline-flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-[#059669]" />
+                Transação protegida com validação idempotente
+              </span>
+              <span className="font-semibold text-[#1E40AF]">Mercado Pago</span>
+            </div>
           </div>
         )}
       </div>

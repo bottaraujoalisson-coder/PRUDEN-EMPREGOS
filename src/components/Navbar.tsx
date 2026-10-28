@@ -54,14 +54,14 @@ export const Navbar: React.FC<NavbarProps> = ({
       : 'candidate';
 
   return (
-    <header className="bg-white/90 backdrop-blur-md border-b border-[#EAECEF] sticky top-0 z-40">
+    <header className="bg-white/95 backdrop-blur-md border-b border-[#DBEAFE] sticky top-0 z-40">
       <div className="container-app">
         <div className="flex items-center justify-between gap-8 h-16">
           {/* Zone 1: Single-Element Brand Wordmark */}
           <button
             type="button"
             onClick={() => onNavigate('home')}
-            className="text-[18px] font-bold tracking-tight text-[#0F172A] cursor-pointer shrink-0 whitespace-nowrap"
+            className="text-[18px] font-extrabold tracking-tight text-[#1E40AF] hover:text-[#1D4ED8] transition-colors cursor-pointer shrink-0 whitespace-nowrap"
             aria-label="Ir para a página inicial do PrudenEmpregos"
           >
             PrudenEmpregos
@@ -79,8 +79,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onNavigate('home')}
                   className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                     currentView === 'home'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                      ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                      : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                   }`}
                 >
                   Vagas
@@ -90,30 +90,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onNavigate('plans')}
                   className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                     currentView === 'plans'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                      ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                      : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                   }`}
                 >
-                  Planos & Vantagens
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onOpenAuth('candidate', 'register')}
-                  className="text-[#64748B] hover:text-[#0F172A] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  Candidatos
+                  Créditos
                 </button>
                 <button
                   type="button"
                   onClick={() => onOpenAuth('company', 'register')}
-                  className="text-[#64748B] hover:text-[#0F172A] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  className="text-[#475569] hover:text-[#1D4ED8] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  Empresas
+                  Para Empresas
                 </button>
                 <button
                   type="button"
                   onClick={() => onOpenAuth('candidate', 'login')}
-                  className="text-[#64748B] hover:text-[#0F172A] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  className="text-[#475569] hover:text-[#1D4ED8] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   Entrar
                 </button>
@@ -127,8 +120,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onNavigate('home')}
                   className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                     currentView === 'home'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                      ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                      : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                   }`}
                 >
                   Buscar Vagas
@@ -138,8 +131,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onNavigate('candidate', candidateSubTab)}
                   className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                     currentView === 'candidate'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                      ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                      : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                   }`}
                 >
                   Meu Painel
@@ -149,8 +142,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => onNavigate('plans')}
                   className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                     currentView === 'plans'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                      ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                      : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                   }`}
                 >
                   Pacotes de Créditos
@@ -158,7 +151,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={onLogout}
-                  className="text-[#64748B] hover:text-[#0F172A] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  className="text-[#475569] hover:text-[#1D4ED8] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   Sair
                 </button>
@@ -169,55 +162,33 @@ export const Navbar: React.FC<NavbarProps> = ({
               <>
                 <button
                   type="button"
-                  onClick={() => onNavigate('company', 'candidates')}
-                  className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    currentView === 'company' && companySubTab === 'candidates'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
-                  }`}
-                >
-                  Candidatos
-                </button>
-                <button
-                  type="button"
                   onClick={() => onNavigate('company', 'jobs')}
                   className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    currentView === 'company' && companySubTab === 'jobs'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                    currentView === 'company'
+                      ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                      : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                   }`}
                 >
-                  Minhas vagas
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onNavigate('company', 'post')}
-                  className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                    currentView === 'company' && companySubTab === 'post'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
-                  }`}
-                >
-                  Publicar vaga
+                  Painel da Empresa
                 </button>
                 <button
                   type="button"
                   onClick={() => onNavigate('plans')}
                   className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                     currentView === 'plans'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                      ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                      : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                   }`}
                 >
-                  Planos
+                  Créditos
                 </button>
                 <button
                   type="button"
                   onClick={() => onNavigate('home')}
                   className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                     currentView === 'home'
-                      ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                      : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                      ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                      : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                   }`}
                 >
                   Mural
@@ -225,7 +196,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={onLogout}
-                  className="text-[#64748B] hover:text-[#0F172A] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  className="text-[#475569] hover:text-[#1D4ED8] font-medium transition-colors cursor-pointer whitespace-nowrap shrink-0"
                 >
                   Sair
                 </button>
@@ -238,8 +209,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => onNavigate('admin')}
                 className={`transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   currentView === 'admin'
-                    ? 'text-[#0F172A] font-semibold underline underline-offset-8 decoration-2 decoration-[#0F172A]'
-                    : 'text-[#64748B] hover:text-[#0F172A] font-medium'
+                    ? 'text-[#1D4ED8] font-semibold underline underline-offset-8 decoration-2 decoration-[#2563EB]'
+                    : 'text-[#475569] hover:text-[#1D4ED8] font-medium'
                 }`}
               >
                 Admin
@@ -255,7 +226,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => onOpenAuth('candidate', 'register')}
                 className="btn-base btn-sm btn-primary whitespace-nowrap shrink-0"
               >
-                Criar conta grátis
+                Criar conta (+30 cr grátis)
               </button>
             ) : (
               <button
@@ -263,11 +234,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => onNavigate(userPanelView)}
                 className="btn-base btn-sm btn-secondary whitespace-nowrap shrink-0"
               >
-                <span className="truncate max-w-[140px] font-medium text-[#0F172A]">
+                <span className="truncate max-w-[140px] font-semibold text-[#1E40AF]">
                   {currentUser.name.split(' ')[0]}
                 </span>
-                <span className="text-[12px] text-[#64748B] font-normal">
-                  · {userIsCompany ? 'Painel CNPJ' : isAdmin ? 'Admin' : 'Meu Painel'}
+                <span className="text-[12px] text-[#475569] font-normal">
+                  · {userIsCompany ? 'Empresa' : isAdmin ? 'Admin' : 'Meu Painel'}
                 </span>
               </button>
             )}
@@ -278,7 +249,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               type="button"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="w-10 h-10 inline-flex items-center justify-center text-[#0F172A] hover:bg-[#F4F4F5] rounded-lg cursor-pointer"
+              className="w-10 h-10 inline-flex items-center justify-center text-[#1E40AF] hover:bg-[#EFF6FF] rounded-lg cursor-pointer"
               aria-label={mobileMenuOpen ? 'Fechar menu de navegação' : 'Abrir menu de navegação'}
               aria-expanded={mobileMenuOpen}
               aria-controls="mobile-nav-drawer"
@@ -293,7 +264,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       {mobileMenuOpen && (
         <div
           id="mobile-nav-drawer"
-          className="md:hidden bg-white border-t border-[#EAECEF] px-4 py-4 space-y-3"
+          className="md:hidden bg-white border-t border-[#DBEAFE] px-4 py-4 space-y-3"
         >
           <nav className="flex flex-col space-y-1" aria-label="Menu móvel">
             {!currentUser && (
@@ -303,8 +274,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => handleMobileNav('home')}
                   className={`w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] ${
                     currentView === 'home'
-                      ? 'bg-[#F4F4F5] text-[#0F172A] font-semibold'
-                      : 'text-[#64748B]'
+                      ? 'bg-[#EFF6FF] text-[#1D4ED8] font-semibold'
+                      : 'text-[#475569]'
                   }`}
                 >
                   Vagas
@@ -314,21 +285,11 @@ export const Navbar: React.FC<NavbarProps> = ({
                   onClick={() => handleMobileNav('plans')}
                   className={`w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] ${
                     currentView === 'plans'
-                      ? 'bg-[#F4F4F5] text-[#0F172A] font-semibold'
-                      : 'text-[#64748B]'
+                      ? 'bg-[#EFF6FF] text-[#1D4ED8] font-semibold'
+                      : 'text-[#475569]'
                   }`}
                 >
-                  Planos & Vantagens
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onOpenAuth('candidate', 'login');
-                    setMobileMenuOpen(false);
-                  }}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#64748B]"
-                >
-                  Para candidatos
+                  Pacotes de Créditos
                 </button>
                 <button
                   type="button"
@@ -336,9 +297,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                     onOpenAuth('company', 'register');
                     setMobileMenuOpen(false);
                   }}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#64748B]"
+                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#475569]"
                 >
-                  Para empresas
+                  Para Empresas
                 </button>
               </>
             )}
@@ -348,30 +309,23 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <button
                   type="button"
                   onClick={() => handleMobileNav('home')}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#0F172A] font-medium"
+                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#1E40AF] font-medium"
                 >
-                  Vagas
+                  Buscar Vagas
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleMobileNav('candidate', 'applications')}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#64748B]"
+                  onClick={() => handleMobileNav('candidate', candidateSubTab)}
+                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#475569]"
                 >
-                  Minhas candidaturas
+                  Meu Painel
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleMobileNav('candidate', 'resume')}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#64748B]"
+                  onClick={() => handleMobileNav('plans')}
+                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#475569]"
                 >
-                  Meu currículo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleMobileNav('candidate', 'saved')}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#64748B]"
-                >
-                  Vagas salvas
+                  Pacotes de Créditos
                 </button>
               </>
             )}
@@ -380,30 +334,30 @@ export const Navbar: React.FC<NavbarProps> = ({
               <>
                 <button
                   type="button"
-                  onClick={() => handleMobileNav('company', 'candidates')}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#0F172A] font-medium"
-                >
-                  Painel da empresa
-                </button>
-                <button
-                  type="button"
                   onClick={() => handleMobileNav('company', 'jobs')}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#64748B]"
+                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#1E40AF] font-medium"
                 >
-                  Minhas vagas
+                  Painel da Empresa
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleMobileNav('company', 'post')}
-                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#64748B]"
+                  onClick={() => handleMobileNav('plans')}
+                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#475569]"
                 >
-                  Publicar vaga
+                  Pacotes de Créditos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleMobileNav('home')}
+                  className="w-full min-h-[42px] text-left px-3 py-2 rounded-lg text-[14px] text-[#475569]"
+                >
+                  Mural de Vagas
                 </button>
               </>
             )}
           </nav>
 
-          <div className="pt-3 border-t border-[#EAECEF] flex gap-2">
+          <div className="pt-3 border-t border-[#DBEAFE] flex gap-2">
             {!currentUser ? (
               <>
                 <button

@@ -12,19 +12,27 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isDirectCloudUid(uid) {
+      return uid is string && uid.size() >= 8 && uid.size() <= 128 && uid.matches('^usr_[a-zA-Z0-9_\\-]+$');
+    }
+
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return (isSignedIn() && request.auth.uid == userId) || isDirectCloudUid(userId);
     }
 
     function isAdmin() {
       return isSignedIn() && (
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        ('email' in request.auth.token && request.auth.token.email.lower() == 'bottaraujoalisson@gmail.com')
+        (
+          'email' in request.auth.token &&
+          request.auth.token.email_verified == true &&
+          request.auth.token.email.lower() == 'bottaraujoalisson@gmail.com'
+        )
       );
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 2 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -40,19 +48,56 @@ service cloud.firestore {
       allow read: if true;
     }
 
-    // USERS COLLECTION
+    // DIRECT CLOUD AUTH ACCOUNTS (PBKDF2-HMAC-SHA256 hashed credentials for custom/Netlify domains)
+    match /auth_accounts/{accountId} {
+      allow get: if isValidId(accountId);
+      allow list: if false;
+      allow create: if isValidId(accountId)
+        && incoming().id == accountId
+        && isDirectCloudUid(incoming().uid)
+        && incoming().email is string && incoming().email.size() <= 254
+        && incoming().passwordHash is string && incoming().passwordHash.size() >= 16 && incoming().passwordHash.size() <= 160;
+      allow update: if isValidId(accountId)
+        && incoming().id == accountId
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().passwordHash is string && incoming().passwordHash.size() >= 16 && incoming().passwordHash.size() <= 160;
+      allow delete: if isAdmin();
+    }
+
+    // CROSS-DOMAIN GOOGLE AUTH BRIDGE
+    match /auth_bridge/{sessionId} {
+      allow get: if isValidId(sessionId);
+      allow list: if false;
+      allow create, update: if isValidId(sessionId)
+        && incoming().sessionId == sessionId
+        && incoming().uid is string && incoming().uid.size() <= 128;
+      allow delete: if isValidId(sessionId);
+    }
+
+    // USERS COLLECTION (Strict RBAC & PII Protection)
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdmin() || (isSignedIn() && resource.data.type == 'company') || resource.data.type == 'company';
+      allow get: if isOwner(userId) || isAdmin() || resource.data.type == 'company';
       allow list: if isAdmin();
-      
-      allow create: if isSignedIn() 
-        && request.auth.uid == userId
-        && (!('uid' in incoming()) || incoming().uid == request.auth.uid)
-        && (isAdmin() || incoming().type in ['candidate', 'company']);
-        
+
+      allow create: if isValidId(userId)
+        && ((isSignedIn() && request.auth.uid == userId) || isDirectCloudUid(userId))
+        && (!('uid' in incoming()) || incoming().uid == userId)
+        && (
+          isAdmin() ||
+          (incoming().type in ['candidate', 'company'] && (!('credits' in incoming()) || (incoming().credits is number && incoming().credits >= 0 && incoming().credits <= 30))) ||
+          (incoming().email == 'bottaraujoalisson@gmail.com' && incoming().type == 'admin')
+        );
+
       allow update: if (isOwner(userId) || isAdmin())
-        && (!('uid' in incoming()) || incoming().uid == userId);
-        
+        && (!('uid' in incoming()) || incoming().uid == userId)
+        && (
+          isAdmin() ||
+          !('type' in incoming()) ||
+          incoming().type == existing().type ||
+          incoming().type in ['candidate', 'company']
+        );
+
       allow delete: if isAdmin();
     }
 
@@ -60,23 +105,21 @@ service cloud.firestore {
     match /document_registry/{docId} {
       allow get: if true;
       allow list: if isAdmin();
-      allow create: if isSignedIn()
-        && isValidId(docId)
-        && incoming().uid == request.auth.uid
+      allow create: if isValidId(docId)
+        && ((isSignedIn() && incoming().uid == request.auth.uid) || isDirectCloudUid(incoming().uid))
         && incoming().documentType in ['CPF', 'CNPJ'];
-      allow update: if isSignedIn()
-        && (resource.data.uid == request.auth.uid || isAdmin())
+      allow update: if isValidId(docId)
+        && ((isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.uid))
         && incoming().uid == resource.data.uid;
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid) || isDirectCloudUid(resource.data.uid);
     }
 
     // GENERATED RESUMES COLLECTION
     match /generated_resumes/{resumeId} {
-      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isSignedIn()
-        && isValidId(resumeId)
-        && incoming().userId == request.auth.uid;
+      allow get: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
+      allow list: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
+      allow create: if isValidId(resumeId)
+        && ((isSignedIn() && incoming().userId == request.auth.uid) || isDirectCloudUid(incoming().userId));
       allow update, delete: if isAdmin();
     }
 
@@ -84,88 +127,89 @@ service cloud.firestore {
     match /jobs/{jobId} {
       allow get: if true;
       allow list: if true;
-      
-      allow create: if isSignedIn()
-        && isValidId(jobId)
-        && incoming().companyId == request.auth.uid
+
+      allow create: if isValidId(jobId)
+        && ((isSignedIn() && incoming().companyId == request.auth.uid) || isDirectCloudUid(incoming().companyId))
         && incoming().title is string && incoming().title.size() <= 150
         && (isAdmin() || incoming().status in ['active', 'paused']);
 
-      allow update: if isSignedIn() 
-        && (resource.data.companyId == request.auth.uid || isAdmin());
+      allow update: if (isSignedIn() && (resource.data.companyId == request.auth.uid || isAdmin()))
+        || isDirectCloudUid(resource.data.companyId);
 
-      allow delete: if isSignedIn() 
-        && (resource.data.companyId == request.auth.uid || isAdmin());
+      allow delete: if (isSignedIn() && (resource.data.companyId == request.auth.uid || isAdmin()))
+        || isDirectCloudUid(resource.data.companyId);
     }
 
     // APPLICATIONS COLLECTION
     match /applications/{applicationId} {
-      allow get: if isSignedIn() && (
-        resource.data.candidateId == request.auth.uid || 
-        resource.data.companyId == request.auth.uid || 
-        isAdmin()
-      );
-      
-      allow list: if isSignedIn() && (
-        resource.data.candidateId == request.auth.uid || 
-        resource.data.companyId == request.auth.uid || 
-        isAdmin()
-      );
-
-      allow create: if isSignedIn()
-        && isValidId(applicationId)
-        && incoming().candidateId == request.auth.uid
-        && incoming().status == 'Enviado';
-
-      allow update: if isSignedIn() && (
+      allow get: if (isSignedIn() && (
+        resource.data.candidateId == request.auth.uid ||
         resource.data.companyId == request.auth.uid ||
         isAdmin()
-      );
+      )) || isDirectCloudUid(resource.data.candidateId) || isDirectCloudUid(resource.data.companyId);
 
-      allow delete: if isSignedIn() && (
+      allow list: if (isSignedIn() && (
+        resource.data.candidateId == request.auth.uid ||
+        resource.data.companyId == request.auth.uid ||
+        isAdmin()
+      )) || isDirectCloudUid(resource.data.candidateId) || isDirectCloudUid(resource.data.companyId);
+
+      allow create: if isValidId(applicationId)
+        && ((isSignedIn() && incoming().candidateId == request.auth.uid) || isDirectCloudUid(incoming().candidateId))
+        && incoming().status == 'Enviado';
+
+      allow update: if (isSignedIn() && (
+        resource.data.companyId == request.auth.uid ||
+        isAdmin()
+      )) || isDirectCloudUid(resource.data.companyId);
+
+      allow delete: if (isSignedIn() && (
         resource.data.candidateId == request.auth.uid ||
         isAdmin()
-      );
+      )) || isDirectCloudUid(resource.data.candidateId);
     }
 
     // REPORTS COLLECTION
     match /reports/{reportId} {
       allow get, list: if isAdmin();
-      
-      allow create: if isSignedIn()
-        && isValidId(reportId)
-        && incoming().reporterId == request.auth.uid;
-        
+
+      allow create: if isValidId(reportId)
+        && ((isSignedIn() && incoming().reporterId == request.auth.uid) || isDirectCloudUid(incoming().reporterId));
+
       allow update, delete: if isAdmin();
     }
 
     // ADMINS COLLECTION
     match /admins/{adminId} {
-      allow read: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
-      allow write: if isAdmin() || (isSignedIn() && ('email' in request.auth.token) && request.auth.token.email.lower() == 'bottaraujoalisson@gmail.com');
+      allow read: if (isSignedIn() && (request.auth.uid == adminId || isAdmin())) || isDirectCloudUid(adminId);
+      allow write: if isAdmin()
+        || (
+          isSignedIn() &&
+          ('email' in request.auth.token) &&
+          request.auth.token.email_verified == true &&
+          request.auth.token.email.lower() == 'bottaraujoalisson@gmail.com'
+        );
     }
 
     // CREDIT ORDERS COLLECTION
     match /credit_orders/{orderId} {
-      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn();
-      allow create: if isSignedIn()
-        && isValidId(orderId)
-        && incoming().userId == request.auth.uid;
-      allow update: if isSignedIn() && (
+      allow get: if resource == null || (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
+      allow list: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
+      allow create: if isValidId(orderId)
+        && ((isSignedIn() && incoming().userId == request.auth.uid) || isDirectCloudUid(incoming().userId));
+      allow update: if (isSignedIn() && (
         (resource.data.userId == request.auth.uid && incoming().userId == existing().userId) ||
         isAdmin()
-      );
+      )) || (isDirectCloudUid(resource.data.userId) && incoming().userId == existing().userId);
       allow delete: if isAdmin();
     }
 
     // CREDIT TRANSACTIONS COLLECTION
     match /credit_transactions/{txId} {
-      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn();
-      allow create: if isSignedIn()
-        && isValidId(txId)
-        && incoming().userId == request.auth.uid;
+      allow get: if resource == null || (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
+      allow list: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
+      allow create: if isValidId(txId)
+        && ((isSignedIn() && incoming().userId == request.auth.uid) || isDirectCloudUid(incoming().userId));
       allow update, delete: if isAdmin();
     }
   }

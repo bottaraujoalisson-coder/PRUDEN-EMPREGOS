@@ -1,6 +1,24 @@
 import { UserProfile, ResumeExperience, ResumeEducation } from '../types';
 
 /**
+ * Sanitiza entradas de texto contra XSS armazenado/DOM e caracteres de controle perigosos.
+ */
+export function sanitizeText(value?: string | null, maxLength = 2000): string {
+  if (!value) return '';
+  return String(value)
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/<\s*script[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, '')
+    .replace(/<\s*(iframe|object|embed|applet|meta|link|style|svg|math)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/javascript\s*:/gi, '')
+    .replace(/vbscript\s*:/gi, '')
+    .replace(/data\s*:\s*text\/html/gi, '')
+    .replace(/\bon[a-z]+\s*=/gi, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+/**
  * Remove todos os caracteres não numéricos de uma string.
  */
 export function normalizeDigits(value?: string | null): string {
@@ -44,7 +62,7 @@ export function formatCEP(value?: string | null): string {
 export function isValidCEP(cep?: string | null): boolean {
   const clean = normalizeDigits(cep);
   if (clean.length !== 8) return false;
-  if (/^0{8}$/.test(clean)) return false;
+  if (/^(\d)\1{7}$/.test(clean)) return false;
   return true;
 }
 
@@ -156,11 +174,186 @@ export function isValidPhone(phone?: string | null): boolean {
 }
 
 /**
- * Valida formato de e-mail.
+ * Valida formato de e-mail seguro (RFC 5322 simplificado + bloqueio de caracteres de injeção).
  */
 export function isValidEmail(email?: string | null): boolean {
   if (!email) return false;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
+  const trimmed = email.trim();
+  if (trimmed.length > 254) return false;
+  if (/[<>()[\]\\,;:\s"]/.test(trimmed)) return false;
+  return /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$/.test(trimmed);
+}
+
+/**
+ * Política de segurança de senha (OWASP ASVS):
+ * Verifica tamanho mínimo, bloqueia sequências triviais conhecidas e calcula pontuação de força.
+ */
+const WEAK_PASSWORDS = new Set([
+  '123456',
+  '1234567',
+  '12345678',
+  '123456789',
+  '654321',
+  'abcdef',
+  'qwerty',
+  'senha123',
+  'password',
+  'admin123',
+  'pruden123',
+]);
+
+export function validatePasswordStrength(password?: string | null): {
+  valid: boolean;
+  score: number;
+  message?: string;
+} {
+  const pwd = String(password || '');
+  if (pwd.length < 6) {
+    return {
+      valid: false,
+      score: 0,
+      message: 'A senha deve ter no mínimo 6 caracteres.',
+    };
+  }
+  if (pwd.length > 128) {
+    return {
+      valid: false,
+      score: 0,
+      message: 'A senha deve ter no máximo 128 caracteres.',
+    };
+  }
+  if (/^(.)\1+$/.test(pwd) || WEAK_PASSWORDS.has(pwd.toLowerCase())) {
+    return {
+      valid: false,
+      score: 1,
+      message: 'Esta senha é muito simples ou comum. Escolha uma combinação mais segura.',
+    };
+  }
+
+  let score = 1;
+  if (pwd.length >= 8) score++;
+  if (/[A-Z]/.test(pwd) && /[a-z]/.test(pwd)) score++;
+  if (/\d/.test(pwd) && /[^A-Za-z0-9]/.test(pwd)) score++;
+
+  return { valid: true, score };
+}
+
+/**
+ * Valida arquivos em DataURL Base64 (PDF ou Imagens), inspecionando MIME, tamanho real em bytes
+ * e assinatura binária (magic bytes) para impedir upload de arquivos maliciosos disfarçados.
+ */
+export function validateSafeUploadDataUrl(
+  dataUrl?: string | null,
+  allowedMimeTypes: string[] = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+  maxBytes: number = 2 * 1024 * 1024
+): {
+  valid: boolean;
+  mimeType?: string;
+  sizeBytes?: number;
+  error?: string;
+} {
+  if (!dataUrl) return { valid: true, sizeBytes: 0 };
+  const match = /^data:([a-zA-Z0-9/+.-]+);base64,([A-Za-z0-9+/=\r\n]+)$/.exec(dataUrl.trim());
+  if (!match) {
+    return { valid: false, error: 'Formato de arquivo inválido (DataURL Base64 malformado).' };
+  }
+
+  const mimeType = match[1].toLowerCase();
+  const base64Payload = match[2].replace(/[\r\n]/g, '');
+
+  if (!allowedMimeTypes.includes(mimeType)) {
+    return {
+      valid: false,
+      mimeType,
+      error: `Tipo de arquivo não permitido (${mimeType}). Formatos aceitos: ${allowedMimeTypes.join(', ')}.`,
+    };
+  }
+
+  const padding = base64Payload.endsWith('==') ? 2 : base64Payload.endsWith('=') ? 1 : 0;
+  const sizeBytes = Math.floor((base64Payload.length * 3) / 4) - padding;
+
+  if (sizeBytes <= 0 || sizeBytes > maxBytes) {
+    return {
+      valid: false,
+      mimeType,
+      sizeBytes,
+      error: `O arquivo excede o tamanho máximo permitido de ${Math.round(maxBytes / 1024)} KB.`,
+    };
+  }
+
+  // Inspeção de Magic Bytes (primeiros bytes decodificados)
+  try {
+    const headerSlice = base64Payload.slice(0, 24);
+    let binaryStr = '';
+    if (typeof Buffer !== 'undefined') {
+      binaryStr = Buffer.from(headerSlice, 'base64').toString('binary');
+    } else if (typeof atob === 'function') {
+      binaryStr = atob(headerSlice);
+    }
+
+    if (binaryStr.length >= 4) {
+      if (mimeType === 'application/pdf' && !binaryStr.startsWith('%PDF-')) {
+        return {
+          valid: false,
+          mimeType,
+          sizeBytes,
+          error: 'O conteúdo do arquivo não corresponde a um documento PDF autêntico.',
+        };
+      }
+      if (
+        mimeType === 'image/jpeg' &&
+        !(binaryStr.charCodeAt(0) === 0xff && binaryStr.charCodeAt(1) === 0xd8)
+      ) {
+        return {
+          valid: false,
+          mimeType,
+          sizeBytes,
+          error: 'O conteúdo do arquivo não corresponde a uma imagem JPEG autêntica.',
+        };
+      }
+      if (
+        mimeType === 'image/png' &&
+        !(
+          binaryStr.charCodeAt(0) === 0x89 &&
+          binaryStr.slice(1, 4) === 'PNG'
+        )
+      ) {
+        return {
+          valid: false,
+          mimeType,
+          sizeBytes,
+          error: 'O conteúdo do arquivo não corresponde a uma imagem PNG autêntica.',
+        };
+      }
+      if (
+        mimeType === 'image/webp' &&
+        !(binaryStr.startsWith('RIFF') && binaryStr.slice(8, 12) === 'WEBP')
+      ) {
+        return {
+          valid: false,
+          mimeType,
+          sizeBytes,
+          error: 'O conteúdo do arquivo não corresponde a uma imagem WebP autêntica.',
+        };
+      }
+    }
+  } catch {
+    return { valid: false, mimeType, error: 'Não foi possível verificar a integridade binária do arquivo.' };
+  }
+
+  return { valid: true, mimeType, sizeBytes };
+}
+
+/**
+ * Valida hostname de consulta DNS para evitar SSRF ou enumeração de hosts internos.
+ */
+export function isSafeAllowedHostname(domain?: string | null): boolean {
+  if (!domain) return false;
+  const clean = String(domain).trim().toLowerCase();
+  if (clean.length < 4 || clean.length > 253) return false;
+  if (clean === 'localhost' || clean.endsWith('.local') || clean.endsWith('.internal')) return false;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(clean) || clean.includes(':')) return false;
+  return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(clean);
 }
 
 export interface RegistrationValidationInput {
@@ -208,7 +401,7 @@ export function validateRegistrationInput(input: RegistrationValidationInput): V
   const role = input.role === 'company' ? 'company' : 'candidate';
   const documentType: 'CPF' | 'CNPJ' = role === 'company' ? 'CNPJ' : 'CPF';
 
-  const cleanName = (input.name || '').trim();
+  const cleanName = sanitizeText(input.name, 120);
   if (!cleanName || cleanName.length < 3) {
     errors.name =
       role === 'company'
@@ -250,16 +443,16 @@ export function validateRegistrationInput(input: RegistrationValidationInput): V
     errors.cep = 'Informe um CEP válido com 8 dígitos (ex: 19010-000).';
   }
 
-  const cleanCity = (input.city || '').trim() || 'Presidente Prudente, SP';
-  const cleanState = (input.state || '').trim().toUpperCase() || 'SP';
-  const cleanStreet = (input.street || '').trim();
-  const cleanNeighborhood = (input.neighborhood || '').trim();
-  const cleanAddressNumber = (input.addressNumber || '').trim();
+  const cleanCity = sanitizeText(input.city, 100) || 'Presidente Prudente, SP';
+  const cleanState = sanitizeText(input.state, 2).toUpperCase() || 'SP';
+  const cleanStreet = sanitizeText(input.street, 160);
+  const cleanNeighborhood = sanitizeText(input.neighborhood, 100);
+  const cleanAddressNumber = sanitizeText(input.addressNumber, 20);
 
   if (input.requirePassword !== false) {
-    const pwd = input.password || '';
-    if (pwd.length < 6) {
-      errors.password = 'A senha deve ter no mínimo 6 caracteres.';
+    const pwdCheck = validatePasswordStrength(input.password);
+    if (!pwdCheck.valid) {
+      errors.password = pwdCheck.message || 'A senha deve ter no mínimo 6 caracteres.';
     }
   }
 
@@ -296,7 +489,7 @@ export function validateCandidateProfileUpdate(profile: Partial<UserProfile>): {
   const errors: Record<string, string> = {};
 
   if (profile.name !== undefined) {
-    const cleanName = profile.name.trim();
+    const cleanName = sanitizeText(profile.name, 120);
     if (cleanName.length < 3) {
       errors.name = 'Informe seu nome completo (mín. 3 caracteres).';
     }
@@ -320,6 +513,28 @@ export function validateCandidateProfileUpdate(profile: Partial<UserProfile>): {
   if (profile.cep !== undefined && profile.cep.trim() !== '') {
     if (!isValidCEP(profile.cep)) {
       errors.cep = 'Informe um CEP válido com 8 dígitos.';
+    }
+  }
+
+  if (profile.photoDataUrl) {
+    const photoCheck = validateSafeUploadDataUrl(
+      profile.photoDataUrl,
+      ['image/jpeg', 'image/png', 'image/webp'],
+      2 * 1024 * 1024
+    );
+    if (!photoCheck.valid) {
+      errors.photoDataUrl = photoCheck.error || 'Foto de perfil inválida.';
+    }
+  }
+
+  if (profile.resumeDataUrl) {
+    const pdfCheck = validateSafeUploadDataUrl(
+      profile.resumeDataUrl,
+      ['application/pdf'],
+      800 * 1024
+    );
+    if (!pdfCheck.valid) {
+      errors.resumeDataUrl = pdfCheck.error || 'Arquivo PDF de currículo inválido.';
     }
   }
 

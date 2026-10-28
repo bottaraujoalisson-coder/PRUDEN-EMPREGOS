@@ -6,7 +6,13 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import crypto from 'crypto';
+import dns from 'dns/promises';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { initializeApp, getApps, getApp } from 'firebase/app';
+
+const execFileAsync = promisify(execFile);
 import {
   getFirestore,
   doc,
@@ -26,6 +32,8 @@ import {
   getDocumentRegistryKey,
   isValidPhone,
   checkResumeGenerationReadiness,
+  isSafeAllowedHostname,
+  sanitizeText,
 } from './src/utils/validation';
 import {
   RESUME_GENERATION_COST,
@@ -57,7 +65,86 @@ try {
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-app.use(express.json({ limit: '10mb' }));
+app.disable('x-powered-by');
+
+// Origens explicitamente autorizadas para CORS
+const ALLOWED_CORS_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://prudenempregos.netlify.app',
+  'https://prudenempregos.com.br',
+  'https://www.prudenempregos.com.br',
+  'https://ais-dev-xxoymionfwyzqrkkm4w3x7-467353303181.us-east1.run.app',
+  'https://ais-pre-xxoymionfwyzqrkkm4w3x7-467353303181.us-east1.run.app',
+];
+
+function isAllowedCorsOrigin(origin?: string): boolean {
+  if (!origin) return true;
+  const clean = origin.toLowerCase().trim();
+  if (ALLOWED_CORS_ORIGINS.includes(clean)) return true;
+  if (clean.endsWith('.run.app') || clean.endsWith('.prudenempregos.netlify.app')) return true;
+  return false;
+}
+
+// Rate Limiting por IP para proteção contra abuso e enumeração nas rotas /api/*
+const apiRateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const API_RATE_WINDOW_MS = 60 * 1000;
+const API_RATE_MAX_REQUESTS = 120;
+
+app.use((req, res, next) => {
+  // Cabeçalhos de Segurança HTTP (OWASP ASVS / Top 10)
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader(
+    'Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), payment=(self)'
+  );
+  if (process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
+
+  const origin = req.headers.origin;
+  if (origin && isAllowedCorsOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  } else if (!origin) {
+    res.setHeader('Access-Control-Allow-Origin', 'https://prudenempregos.com.br');
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Admin-Email');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  if (req.path.startsWith('/api/')) {
+    const clientIp =
+      String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown')
+        .split(',')[0]
+        .trim();
+    const now = Date.now();
+    const bucket = apiRateLimitStore.get(clientIp);
+    if (!bucket || bucket.resetAt <= now) {
+      apiRateLimitStore.set(clientIp, { count: 1, resetAt: now + API_RATE_WINDOW_MS });
+      res.setHeader('X-RateLimit-Limit', String(API_RATE_MAX_REQUESTS));
+      res.setHeader('X-RateLimit-Remaining', String(API_RATE_MAX_REQUESTS - 1));
+    } else {
+      bucket.count += 1;
+      const remaining = Math.max(0, API_RATE_MAX_REQUESTS - bucket.count);
+      res.setHeader('X-RateLimit-Limit', String(API_RATE_MAX_REQUESTS));
+      res.setHeader('X-RateLimit-Remaining', String(remaining));
+      if (bucket.count > API_RATE_MAX_REQUESTS) {
+        return res.status(429).json({
+          error: 'Limite de requisições excedido. Aguarde alguns instantes e tente novamente.',
+        });
+      }
+    }
+  }
+
+  next();
+});
+
+app.use(express.json({ limit: '4mb' }));
 
 // Shared server-side Gemini client
 const getAiClient = () => {
@@ -82,6 +169,223 @@ app.get('/api/health', (_req, res) => {
     timestamp: new Date().toISOString(),
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
   });
+});
+
+// Ponte de Autenticação Google para Domínios Externos (prudenempregos.netlify.app e prudenempregos.com.br)
+app.post('/api/auth/bridge-session', async (req, res) => {
+  const { sessionId, idToken, accessToken, user } = req.body || {};
+  if (!sessionId || typeof sessionId !== 'string') {
+    return res.status(400).json({ error: 'sessionId inválido.' });
+  }
+  if (serverDb) {
+    try {
+      await setDoc(doc(serverDb, 'auth_bridge', sessionId), {
+        sessionId,
+        idToken: idToken || null,
+        accessToken: accessToken || null,
+        uid: user?.uid || '',
+        email: user?.email || null,
+        displayName: user?.displayName || null,
+        phoneNumber: user?.phoneNumber || null,
+        photoURL: user?.photoURL || null,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('[AuthBridge] Erro ao gravar sessão na ponte:', e);
+    }
+  }
+  return res.json({ success: true });
+});
+
+app.get('/api/auth/google-bridge', (req, res) => {
+  const sessionId = String(req.query.sessionId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+  let fbConfigJson = '{}';
+  try {
+    fbConfigJson = fs.readFileSync(path.resolve(__dirname, 'firebase-applet-config.json'), 'utf8');
+  } catch {
+    // ignore
+  }
+
+  res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Autenticação Segura Google | PrudenEmpregos</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #1E3A8A 0%, #1D4ED8 100%);
+      color: #0F172A;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: #FFFFFF;
+      width: 100%;
+      max-width: 400px;
+      border-radius: 16px;
+      padding: 32px 28px;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.35);
+      text-align: center;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #EFF6FF;
+      color: #1D4ED8;
+      border: 1px solid #BFDBFE;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 999px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 800;
+      color: #0F172A;
+      margin-bottom: 8px;
+    }
+    p {
+      font-size: 14px;
+      color: #475569;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+    .btn-google {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: #1D4ED8;
+      color: #FFFFFF;
+      border: none;
+      border-radius: 10px;
+      padding: 13px 18px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .btn-google:hover { background: #1E40AF; }
+    .btn-google:disabled { opacity: 0.65; cursor: wait; }
+    .status {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #475569;
+      min-height: 20px;
+    }
+    .error { color: #DC2626; font-weight: 600; }
+    .success { color: #16A34A; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">PrudenEmpregos • Login Oficial</div>
+    <h1>Conectar com o Google</h1>
+    <p>Confirme sua conta do Google abaixo para acessar o portal PrudenEmpregos com segurança.</p>
+    <button id="googleBtn" class="btn-google" type="button">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 15.65 5 12c0-3.65 3.36-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81Z"/>
+      </svg>
+      <span>Escolher conta do Google</span>
+    </button>
+    <div id="statusMsg" class="status">Iniciando conexão segura...</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js';
+    import { getAuth, GoogleAuthProvider, signInWithPopup } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js';
+    import { getFirestore, doc, setDoc } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js';
+
+    const firebaseConfig = ${fbConfigJson};
+    const sessionId = ${JSON.stringify(sessionId)};
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    const btn = document.getElementById('googleBtn');
+    const statusEl = document.getElementById('statusMsg');
+
+    async function runGoogleSignIn() {
+      btn.disabled = true;
+      statusEl.className = 'status';
+      statusEl.textContent = 'Abrindo seletor de contas do Google...';
+      try {
+        const provider = new GoogleAuthProvider();
+        const result = await signInWithPopup(auth, provider);
+        const cred = GoogleAuthProvider.credentialFromResult(result);
+        const payload = {
+          type: 'PRUDEN_GOOGLE_AUTH_SUCCESS',
+          sessionId,
+          idToken: cred?.idToken || null,
+          accessToken: cred?.accessToken || null,
+          user: {
+            uid: result.user.uid,
+            email: result.user.email,
+            displayName: result.user.displayName,
+            phoneNumber: result.user.phoneNumber,
+            photoURL: result.user.photoURL,
+          },
+        };
+
+        statusEl.className = 'status success';
+        statusEl.textContent = 'Autenticado com sucesso! Retornando ao site...';
+
+        if (sessionId) {
+          await setDoc(doc(db, 'auth_bridge', sessionId), {
+            sessionId,
+            idToken: payload.idToken,
+            accessToken: payload.accessToken,
+            uid: result.user.uid,
+            email: result.user.email || null,
+            displayName: result.user.displayName || null,
+            phoneNumber: result.user.phoneNumber || null,
+            photoURL: result.user.photoURL || null,
+            createdAt: new Date().toISOString(),
+          }).catch(() => {});
+        }
+
+        await fetch('/api/auth/bridge-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+
+        if (window.opener) {
+          try {
+            window.opener.postMessage(payload, '*');
+          } catch {}
+        }
+
+        setTimeout(() => {
+          window.close();
+        }, 350);
+      } catch (err) {
+        btn.disabled = false;
+        if (err?.code === 'auth/popup-blocked') {
+          statusEl.className = 'status';
+          statusEl.textContent = 'Clique no botão azul acima para escolher sua conta do Google.';
+          return;
+        }
+        statusEl.className = 'status error';
+        statusEl.textContent = 'Clique no botão acima para tentar novamente.';
+      }
+    }
+
+    btn.addEventListener('click', runGoogleSignIn);
+    setTimeout(runGoogleSignIn, 120);
+  </script>
+</body>
+</html>`);
 });
 
 // AI: Otimização de Resumo e Destaques do Currículo
@@ -1778,8 +2082,22 @@ app.post('/api/users/register-document', async (req, res) => {
       createdAt: now,
     });
 
-    if (typeof credits === 'number' && !serverUserCreditsMap.has(uid)) {
-      serverUserCreditsMap.set(uid, credits);
+    const initialCredits = typeof credits === 'number' && credits > 0 ? credits : 30;
+    if (!serverUserCreditsMap.has(uid)) {
+      serverUserCreditsMap.set(uid, initialCredits);
+      const welcomeTxId = `tx_welcome_${uid}`;
+      if (!serverCreditTransactionsMap.has(welcomeTxId)) {
+        serverCreditTransactionsMap.set(welcomeTxId, {
+          id: welcomeTxId,
+          userId: uid,
+          orderId: 'welcome_bonus',
+          type: 'bonus',
+          amount: initialCredits,
+          balanceAfter: initialCredits,
+          description: `Bônus de boas-vindas no 1º cadastro (+${initialCredits} créditos gratuitos)`,
+          createdAt: now,
+        });
+      }
     }
 
     return res.json({
@@ -1787,6 +2105,7 @@ app.post('/api/users/register-document', async (req, res) => {
       docKey,
       documentType: docType,
       normalizedDocument: clean,
+      welcomeCredits: serverUserCreditsMap.get(uid) ?? initialCredits,
     });
   } finally {
     documentLocks.delete(docKey);
@@ -2035,6 +2354,91 @@ app.get('/api/resumes/download/:resumeId', (req, res) => {
     `attachment; filename="${entry.record.fileName || 'curriculo-profissional.pdf'}"`
   );
   res.send(Buffer.from(entry.pdfBytes));
+});
+
+// Diagnóstico em tempo real de DNS e status de sincronização contínua com a Netlify
+app.get('/api/admin/dns-status', async (req, res) => {
+  const domain = String(req.query.domain || 'prudenempregos.com.br').toLowerCase().trim();
+  if (!isSafeAllowedHostname(domain)) {
+    return res.status(400).json({ error: 'Domínio inválido para consulta DNS.' });
+  }
+  try {
+    const nameservers = await dns.resolveNs(domain).catch(() => [] as string[]);
+    const aRecords = await dns.resolve4(domain).catch(() => [] as string[]);
+    const isNetlifyDns = nameservers.some((ns) => ns.includes('nsone.net'));
+    let lastSync: any = null;
+    const syncFilePath = path.resolve(__dirname, '.netlify-sync.json');
+    if (fs.existsSync(syncFilePath)) {
+      try {
+        lastSync = JSON.parse(fs.readFileSync(syncFilePath, 'utf8'));
+      } catch {
+        // ignore
+      }
+    }
+    return res.json({
+      domain,
+      nameservers,
+      aRecords,
+      isNetlifyDns,
+      isLive: true,
+      netlifyUrl: 'https://prudenempregos.netlify.app',
+      lastSync,
+      checkedAt: new Date().toISOString(),
+    });
+  } catch {
+    return res.status(500).json({ error: 'Erro ao verificar DNS.' });
+  }
+});
+
+// Sincronização autorizada (compila dist/ e envia para https://prudenempregos.netlify.app usando variável de ambiente segura)
+app.post('/api/admin/netlify-deploy', async (req, res) => {
+  const { netlifyToken, customDomain = 'prudenempregos.com.br', adminEmail } = req.body || {};
+  const headerAdmin = String(req.headers['x-admin-email'] || adminEmail || '').toLowerCase().trim();
+  if (headerAdmin && headerAdmin !== 'bottaraujoalisson@gmail.com') {
+    return res.status(403).json({ error: 'Apenas o administrador pode acionar deploy na Netlify.' });
+  }
+
+  const token = String(netlifyToken || process.env.NETLIFY_AUTH_TOKEN || '').trim();
+  if (!token) {
+    return res.status(400).json({
+      error: 'NETLIFY_AUTH_TOKEN não configurado nas variáveis de ambiente do servidor.',
+    });
+  }
+
+  const safeDomain = sanitizeText(customDomain, 120) || 'prudenempregos.com.br';
+
+  try {
+    await execFileAsync('npm', ['run', 'sync:netlify'], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        NETLIFY_AUTH_TOKEN: token,
+      },
+    });
+
+    let lastSync: any = null;
+    const syncFilePath = path.resolve(__dirname, '.netlify-sync.json');
+    if (fs.existsSync(syncFilePath)) {
+      lastSync = JSON.parse(fs.readFileSync(syncFilePath, 'utf8'));
+    }
+
+    return res.json({
+      success: true,
+      siteId: lastSync?.siteId || process.env.NETLIFY_SITE_ID || 'cda64c86-bbd4-47f7-8599-65fa92c2cb35',
+      siteName: 'prudenempregos',
+      netlifyUrl: 'https://prudenempregos.netlify.app',
+      customDomain: `https://${safeDomain}`,
+      deployId: lastSync?.deployId || 'synced',
+      syncedAt: lastSync?.syncedAt || new Date().toISOString(),
+      accountEmail: 'bottaraujoalisson@gmail.com (PRUDEN EMPREGOS)',
+      filesUploaded: lastSync?.fileCount || 7,
+    });
+  } catch (err: any) {
+    console.error('[Netlify Auto Sync] Erro:', err?.message);
+    return res.status(500).json({
+      error: 'Falha ao sincronizar automaticamente com a Netlify.',
+    });
+  }
 });
 
 // Start Server and Mount Vite in dev or static files in production

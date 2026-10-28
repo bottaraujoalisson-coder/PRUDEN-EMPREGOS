@@ -195,6 +195,35 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "userId", "type", "amount", "balanceAfter", "createdAt"]
+    },
+    "AuthAccount": {
+      "title": "AuthAccount",
+      "description": "Hashed email and password credential record for direct cloud authentication across custom domains",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "passwordHash": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "uid", "email", "passwordHash"]
+    },
+    "AuthBridgeSession": {
+      "title": "AuthBridgeSession",
+      "description": "Short-lived OAuth credential relay record for cross-domain Google authentication",
+      "type": "object",
+      "properties": {
+        "sessionId": { "type": "string", "maxLength": 128 },
+        "idToken": { "type": "string", "maxLength": 4096 },
+        "accessToken": { "type": "string", "maxLength": 2048 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 150 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["sessionId", "uid", "createdAt"]
     }
   },
   "firestore": {
@@ -233,6 +262,14 @@
     "/credit_transactions/{txId}": {
       "schema": "CreditTransaction",
       "description": "Immutable audit ledger of credit additions, usages, and refunds."
+    },
+    "/auth_accounts/{accountId}": {
+      "schema": "AuthAccount",
+      "description": "Stores hashed credentials for direct email/password login across custom and Netlify domains."
+    },
+    "/auth_bridge/{sessionId}": {
+      "schema": "AuthBridgeSession",
+      "description": "Ephemeral OAuth credential relay between authorized Cloud Run domain and custom/Netlify domains."
     }
   }
 }

@@ -9,6 +9,7 @@ import {
   runTransaction,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
+import { getActiveSessionUid } from './directCloudAuth';
 import { handleFirestoreError, OperationType } from '../firebase/errors';
 import {
   UserProfile,
@@ -29,7 +30,9 @@ import {
 import {
   RESUME_GENERATION_COST,
   buildStructuredResumeFromProfile,
+  generateSelectableResumePdfDataUrl,
 } from '../utils/pdfResumeGenerator';
+import { INITIAL_WELCOME_CREDITS } from '../utils/creditsData';
 
 export const ADMIN_EMAIL = 'bottaraujoalisson@gmail.com';
 
@@ -153,7 +156,7 @@ export async function saveUserProfile(
     formattedDoc = formatCNPJ(normalizedDoc);
   }
 
-  // Valida e registra no backend para garantir bloqueio de duplicidade inclusive em requisições simultâneas
+  // Valida e registra no backend quando disponível; no Netlify estático, a transação do Firestore (document_registry) garante a unicidade
   if (docType && normalizedDoc) {
     const backendRes = await fetch('/api/users/register-document', {
       method: 'POST',
@@ -171,7 +174,11 @@ export async function saveUserProfile(
       }),
     }).catch(() => null);
 
-    if (backendRes && !backendRes.ok) {
+    if (
+      backendRes &&
+      (backendRes.status === 400 || backendRes.status === 409) &&
+      (backendRes.headers.get('content-type') || '').includes('application/json')
+    ) {
       const errBody = await backendRes.json().catch(() => ({}));
       throw new Error(
         errBody.error ||
@@ -180,8 +187,9 @@ export async function saveUserProfile(
     }
   }
 
-  // Operações no Firestore são executadas exclusivamente quando o usuário está autenticado
-  if (!auth.currentUser || auth.currentUser.uid !== uid) {
+  // Operações no Firestore são executadas quando o usuário possui sessão ativa
+  const activeUid = auth.currentUser?.uid || getActiveSessionUid();
+  if (!activeUid || activeUid !== uid) {
     return;
   }
 
@@ -232,14 +240,30 @@ export async function saveUserProfile(
         if (userSnap.exists()) {
           transaction.update(userRef, enrichedProfile);
         } else {
+          const initialCredits =
+            typeof enrichedProfile.credits === 'number'
+              ? enrichedProfile.credits
+              : INITIAL_WELCOME_CREDITS;
           transaction.set(
             userRef,
             stripUndefined({
               uid,
               createdAt: now,
+              credits: initialCredits,
               ...enrichedProfile,
             })
           );
+          const welcomeTxRef = doc(db, 'credit_transactions', `tx_welcome_${uid}`);
+          transaction.set(welcomeTxRef, {
+            id: `tx_welcome_${uid}`,
+            userId: uid,
+            orderId: 'welcome_bonus',
+            type: 'bonus',
+            amount: initialCredits,
+            balanceAfter: initialCredits,
+            description: `Bônus de boas-vindas no 1º cadastro (+${initialCredits} créditos gratuitos)`,
+            createdAt: now,
+          });
         }
       });
       return;
@@ -253,10 +277,13 @@ export async function saveUserProfile(
       });
       await updateDoc(userRef, payload);
     } else {
+      const initialCredits =
+        typeof profile.credits === 'number' ? profile.credits : INITIAL_WELCOME_CREDITS;
       const payload = stripUndefined({
         uid,
         createdAt: now,
         updatedAt: now,
+        credits: initialCredits,
         ...profile,
       });
       await setDoc(userRef, payload);
@@ -296,27 +323,56 @@ export async function generateResumeWithCredits(
     includeCpfInPdf: options.includeCpfInPdf,
   });
 
-  const res = await fetch('/api/resumes/generate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      userId: user.uid,
-      userEmail: user.email,
-      currentClientCredits: user.credits ?? 0,
-      idempotencyKey: options.idempotencyKey,
-      templateId: options.templateId,
-      includeCpfInPdf: options.includeCpfInPdf,
-      resumePayload: structuredResume,
-    }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
+  const currentCredits = Number(user.credits ?? 0);
+  if (currentCredits < RESUME_GENERATION_COST) {
     throw new Error(
-      data.error ||
-        'Não foi possível gerar o currículo no momento. Nenhum crédito foi debitado.'
+      `Saldo insuficiente. A geração do currículo custa ${RESUME_GENERATION_COST} créditos e seu saldo atual é de ${currentCredits} créditos.`
     );
+  }
+
+  let data: any = {};
+  try {
+    const res = await fetch('/api/resumes/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: user.uid,
+        userEmail: user.email,
+        currentClientCredits: currentCredits,
+        idempotencyKey: options.idempotencyKey,
+        templateId: options.templateId,
+        includeCpfInPdf: options.includeCpfInPdf,
+        resumePayload: structuredResume,
+      }),
+    });
+
+    const isJson = res.headers.get('content-type')?.includes('application/json');
+    if (isJson) {
+      data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          data.error ||
+            'Não foi possível gerar o currículo no momento. Nenhum crédito foi debitado.'
+        );
+      }
+    }
+  } catch (err: any) {
+    if (err.message?.includes('Saldo insuficiente') || err.message?.includes('Não foi possível')) {
+      throw err;
+    }
+  }
+
+  // Fallback cliente (hospedagem estática / Netlify CDN) caso o servidor Node não tenha respondido com o PDF
+  if (!data.pdfDataUrl) {
+    const generatedPdf = generateSelectableResumePdfDataUrl(structuredResume);
+    data = {
+      resumeId: `res_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      fileName: generatedPdf.fileName,
+      pdfDataUrl: generatedPdf.dataUrl,
+      downloadUrl: generatedPdf.dataUrl,
+      creditsDebited: RESUME_GENERATION_COST,
+      newBalance: Math.max(0, currentCredits - RESUME_GENERATION_COST),
+    };
   }
 
   const resumeId: string = data.resumeId;
@@ -324,67 +380,68 @@ export async function generateResumeWithCredits(
   const now = new Date().toISOString();
 
   // Sincroniza de forma idempotente no Firestore para manter saldo e histórico 100% consistentes
-  if (auth.currentUser && auth.currentUser.uid === user.uid) {
+  const activeResumeUid = auth.currentUser?.uid || getActiveSessionUid();
+  if (activeResumeUid && activeResumeUid === user.uid) {
     try {
       await runTransaction(db, async (transaction) => {
         const userRef = doc(db, 'users', user.uid);
         const txRef = doc(db, 'credit_transactions', txId);
         const genRef = doc(db, 'generated_resumes', resumeId);
 
-      const [userSnap, txSnap] = await Promise.all([
-        transaction.get(userRef),
-        transaction.get(txRef),
-      ]);
+        const [userSnap, txSnap] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(txRef),
+        ]);
 
-      // Se a transação de geração já foi gravada no Firestore, não debita novamente
-      if (txSnap.exists()) {
-        return;
-      }
+        // Se a transação de geração já foi gravada no Firestore, não debita novamente
+        if (txSnap.exists()) {
+          return;
+        }
 
-      const dbCredits = userSnap.exists()
-        ? (userSnap.data().credits ?? user.credits ?? 0)
-        : (user.credits ?? 0);
+        const dbCredits = userSnap.exists()
+          ? (userSnap.data().credits ?? user.credits ?? 0)
+          : (user.credits ?? 0);
 
-      const updatedBalance =
-        typeof data.newBalance === 'number'
-          ? data.newBalance
-          : Math.max(0, dbCredits - RESUME_GENERATION_COST);
+        const updatedBalance =
+          typeof data.newBalance === 'number'
+            ? data.newBalance
+            : Math.max(0, dbCredits - RESUME_GENERATION_COST);
 
-      const txRecord: CreditTransaction = {
-        id: txId,
-        userId: user.uid,
-        orderId: resumeId,
-        type: 'usage',
-        amount: -RESUME_GENERATION_COST,
-        balanceAfter: updatedBalance,
-        description: `Geração de Currículo Profissional ATS (${options.templateId}) (-${RESUME_GENERATION_COST} créditos)`,
-        createdAt: now,
-      };
+        const txRecord: CreditTransaction = {
+          id: txId,
+          userId: user.uid,
+          orderId: resumeId,
+          type: 'usage',
+          amount: -RESUME_GENERATION_COST,
+          balanceAfter: updatedBalance,
+          description: `Geração de Currículo Profissional ATS (${options.templateId}) (-${RESUME_GENERATION_COST} créditos)`,
+          createdAt: now,
+        };
 
-      const genRecord: GeneratedResumeRecord = {
-        id: resumeId,
-        userId: user.uid,
-        templateId: options.templateId,
-        fileName: data.fileName,
-        downloadUrl: data.downloadUrl,
-        creditsCharged: RESUME_GENERATION_COST,
-        transactionId: txId,
-        createdAt: now,
-      };
+        const genRecord: GeneratedResumeRecord = {
+          id: resumeId,
+          userId: user.uid,
+          templateId: options.templateId,
+          fileName: data.fileName,
+          downloadUrl: data.downloadUrl,
+          creditsCharged: RESUME_GENERATION_COST,
+          transactionId: txId,
+          createdAt: now,
+        };
 
-      if (userSnap.exists()) {
-        transaction.update(userRef, {
-          credits: updatedBalance,
-          updatedAt: now,
-        });
-      }
-      transaction.set(txRef, txRecord);
-      transaction.set(genRef, genRecord);
-    });
-  } catch {
-    // O servidor já registrou a transação e o saldo autoritativo
+        if (userSnap.exists()) {
+          transaction.update(userRef, {
+            credits: updatedBalance,
+            updatedAt: now,
+          });
+        }
+        transaction.set(txRef, txRecord);
+        transaction.set(genRef, genRecord);
+      });
+    } catch {
+      // O servidor já registrou a transação e o saldo autoritativo
+    }
   }
-}
 
   return {
     success: true,
@@ -443,29 +500,38 @@ export async function consumeUserCredits(
     throw err;
   }
 
-  const res = await fetch('/api/credits/consume', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      userId: user.uid,
-      actionType: resolvedAction,
-      currentClientCredits: currentCredits,
-      referenceId: resolvedRefId,
-      description: options.description,
-      idempotencyKey: options.idempotencyKey,
-    }),
-  });
+  let data: any = {};
+  try {
+    const res = await fetch('/api/credits/consume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: user.uid,
+        actionType: resolvedAction,
+        currentClientCredits: currentCredits,
+        referenceId: resolvedRefId,
+        description: options.description,
+        idempotencyKey: options.idempotencyKey,
+      }),
+    });
 
-  const data = await res.json().catch(() => ({}));
-
-  if (!res.ok) {
-    const err: any = new Error(
-      data.error || `Saldo insuficiente para ${actionMeta.label} (${actionMeta.cost} créditos).`
-    );
-    err.code = data.code || 'INSUFFICIENT_CREDITS';
-    err.requiredCredits = data.requiredCredits ?? actionMeta.cost;
-    err.currentCredits = data.currentCredits ?? currentCredits;
-    throw err;
+    const isJson = res.headers.get('content-type')?.includes('application/json');
+    if (isJson) {
+      data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err: any = new Error(
+          data.error || `Saldo insuficiente para ${actionMeta.label} (${actionMeta.cost} créditos).`
+        );
+        err.code = data.code || 'INSUFFICIENT_CREDITS';
+        err.requiredCredits = data.requiredCredits ?? actionMeta.cost;
+        err.currentCredits = data.currentCredits ?? currentCredits;
+        throw err;
+      }
+    }
+  } catch (err: any) {
+    if (err.code === 'INSUFFICIENT_CREDITS') {
+      throw err;
+    }
   }
 
   const newBalance: number =
@@ -478,8 +544,33 @@ export async function consumeUserCredits(
     `tx_${resolvedAction}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const now = new Date().toISOString();
 
+  const txRecord: CreditTransaction = {
+    id: txId,
+    userId: user.uid,
+    orderId: resolvedRefId || resolvedAction,
+    type: 'usage',
+    amount: -actionMeta.cost,
+    balanceAfter: newBalance,
+    description:
+      options.description || `${actionMeta.label} (-${actionMeta.cost} créditos)`,
+    createdAt: now,
+  };
+
+  try {
+    const rawLocal = localStorage.getItem('pruden_credit_tx_v1');
+    const parsedLocal: CreditTransaction[] = rawLocal ? JSON.parse(rawLocal) : [];
+    const updatedLocal = [
+      txRecord,
+      ...(Array.isArray(parsedLocal) ? parsedLocal.filter((t) => t.id !== txId) : []),
+    ].slice(0, 100);
+    localStorage.setItem('pruden_credit_tx_v1', JSON.stringify(updatedLocal));
+  } catch {
+    // Ignore localStorage quota error
+  }
+
   // Sincroniza no Firestore quando autenticado
-  if (auth.currentUser && auth.currentUser.uid === user.uid) {
+  const activeConsumeUid = auth.currentUser?.uid || getActiveSessionUid();
+  if (activeConsumeUid && activeConsumeUid === user.uid) {
     try {
       await runTransaction(db, async (transaction) => {
         const userRef = doc(db, 'users', user.uid);
@@ -490,18 +581,6 @@ export async function consumeUserCredits(
         ]);
 
         if (txSnap.exists()) return;
-
-        const txRecord: CreditTransaction = {
-          id: txId,
-          userId: user.uid,
-          orderId: resolvedRefId || resolvedAction,
-          type: 'usage',
-          amount: -actionMeta.cost,
-          balanceAfter: newBalance,
-          description:
-            options.description || `${actionMeta.label} (-${actionMeta.cost} créditos)`,
-          createdAt: now,
-        };
 
         if (userSnap.exists()) {
           transaction.update(userRef, {
@@ -520,7 +599,7 @@ export async function consumeUserCredits(
     success: true,
     creditsDebited: actionMeta.cost,
     newBalance,
-    transaction: data.transaction,
+    transaction: data.transaction || txRecord,
   };
 }
 

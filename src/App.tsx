@@ -33,11 +33,17 @@ import {
   checkIsAdmin,
   consumeUserCredits,
 } from './services/usersService';
+import {
+  getActiveSessionUid,
+  setActiveSessionUid,
+} from './services/directCloudAuth';
+import { confirmAndCreditOrder } from './services/mercadopagoService';
 import { Job, Application, UserProfile, PricingPlan, PlanPeriod } from './types';
 import {
   CreditPackage,
   CREDIT_PACKAGES,
   CANDIDATE_RESUME_CREDIT_PACKAGE,
+  INITIAL_WELCOME_CREDITS,
   APPLY_JOB_CREDIT_COST,
   POST_JOB_CREDIT_COST,
   BOOST_JOB_CREDIT_COST,
@@ -70,7 +76,7 @@ export default function App() {
           skills: [],
           savedJobIds: [],
           profileCompleteness: 25,
-          credits: 5,
+          credits: INITIAL_WELCOME_CREDITS,
         }
       : null
   );
@@ -225,6 +231,7 @@ export default function App() {
             }
           } else if (!isAuthModalOpenRef.current) {
             await signOut(auth);
+            setActiveSessionUid(null);
             setCurrentUser(null);
             setIsAdmin(false);
           }
@@ -232,6 +239,29 @@ export default function App() {
           console.error('Error fetching user profile:', err);
         }
       } else if (!isAutostartCandidate) {
+        const storedUid = getActiveSessionUid();
+        if (storedUid) {
+          try {
+            const profile = await getUserProfile(storedUid);
+            if (profile) {
+              const adminCheck = await checkIsAdmin(storedUid, profile.email);
+              setIsAdmin(adminCheck);
+              if (adminCheck && profile.type !== 'admin') {
+                const promoted: UserProfile = { ...profile, type: 'admin' };
+                await saveUserProfile(storedUid, { type: 'admin' });
+                setCurrentUser(promoted);
+              } else {
+                setCurrentUser(profile);
+              }
+              setAuthLoading(false);
+              return;
+            } else {
+              setActiveSessionUid(null);
+            }
+          } catch {
+            // ignore
+          }
+        }
         setCurrentUser(null);
         setIsAdmin(false);
       }
@@ -258,6 +288,43 @@ export default function App() {
         setApplications(apps);
       });
       return () => unsub();
+    }
+  }, [currentUser]);
+
+  // 4. Handle Mercado Pago Checkout Pro Return URL Callbacks (?mp_status=approved&order=...)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !currentUser) return;
+    const params = new URLSearchParams(window.location.search);
+    const mpStatus = params.get('mp_status');
+    const orderId = params.get('order');
+    const paymentId = params.get('payment_id') || params.get('collection_id') || undefined;
+
+    if (!mpStatus) return;
+
+    // Clean query params from URL to prevent re-triggering on refresh
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+
+    if (mpStatus === 'approved' && orderId) {
+      confirmAndCreditOrder(currentUser, orderId, paymentId)
+        .then((res) => {
+          setCurrentUser((prev) => (prev ? { ...prev, credits: res.newBalance } : null));
+          setCurrentView('plans');
+          showToast(
+            res.alreadyProcessed
+              ? `Pedido confirmado! Saldo disponível: ${res.newBalance} créditos.`
+              : `Pagamento aprovado no Mercado Pago! +${res.creditsAdded} créditos liberados (Saldo: ${res.newBalance} cr).`
+          );
+        })
+        .catch(() => {
+          showToast('Não foi possível sincronizar o pedido automaticamente. Verifique na aba Créditos.', 'error');
+        });
+    } else if (mpStatus === 'pending') {
+      setCurrentView('plans');
+      showToast('Pagamento em processamento no Mercado Pago. Seus créditos serão liberados após confirmação.');
+    } else if (mpStatus === 'failure') {
+      setCurrentView('plans');
+      showToast('O pagamento não foi concluído no Mercado Pago. Tente novamente via Pix ou Cartão.', 'error');
     }
   }, [currentUser]);
 
@@ -457,15 +524,18 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
+    setActiveSessionUid(null);
+    await signOut(auth).catch(() => {});
     setCurrentUser(null);
+    setIsAdmin(false);
     navigateTo('home');
     showToast('Você saiu da sua conta.');
   };
 
   const handleBuyCreditsFromLockModal = (planId: string) => {
+    const allPkgs = [CANDIDATE_RESUME_CREDIT_PACKAGE, ...CREDIT_PACKAGES];
     const matchedPkg =
-      CREDIT_PACKAGES.find((p) => p.id === planId) ||
+      allPkgs.find((p) => p.id === planId) ||
       (isCompany(currentUser) ? CREDIT_PACKAGES[0] : CANDIDATE_RESUME_CREDIT_PACKAGE);
     setSelectedPlanForCheckout(null);
     setSelectedCreditPackageForCheckout(matchedPkg);
@@ -476,7 +546,7 @@ export default function App() {
     : [];
 
   return (
-    <div className="flex flex-col min-h-screen font-sans bg-[#FAFAFA] text-[#0F172A] selection:bg-[#2563EB] selection:text-white">
+    <div className="flex flex-col min-h-screen font-sans bg-[#F4F7FE] text-[#0F172A] selection:bg-[#1D4ED8] selection:text-white">
       <Navbar
         currentUser={currentUser}
         isAdmin={isAdmin}
@@ -583,9 +653,13 @@ export default function App() {
               setSelectedPlanForCheckout(null);
               setSelectedCreditPackageForCheckout(pkg);
             }}
+            onCreditsUpdated={(newBalance) => {
+              setCurrentUser((prev) => (prev ? { ...prev, credits: newBalance } : null));
+            }}
+            showToast={showToast}
             onNavigate={navigateTo}
             onOpenAuth={(type, mode) => {
-              setAuthModalRole(type);
+              setAuthModalRole(type || 'candidate');
               setAuthModalMode(mode || 'register');
               setIsAuthModalOpen(true);
             }}
@@ -709,13 +783,19 @@ export default function App() {
             navigateTo('candidate', 'applications');
           }
         }}
-        onCreditsPurchased={(newBalance) => {
+        onCreditsPurchased={(newBalance, creditsAdded, packageTitle) => {
           setCurrentUser((prev) => (prev ? { ...prev, credits: newBalance } : null));
+          showToast(
+            `Pagamento aprovado! +${creditsAdded} créditos do ${packageTitle} adicionados (Saldo: ${newBalance} cr).`
+          );
         }}
         onRequireAuth={() => {
-          const target = selectedCreditPackageForCheckout
-            ? 'company'
-            : selectedPlanForCheckout?.plan.targetRole || 'candidate';
+          const target =
+            selectedCreditPackageForCheckout?.id === 'pack_resume_15'
+              ? 'candidate'
+              : selectedCreditPackageForCheckout
+              ? 'company'
+              : selectedPlanForCheckout?.plan.targetRole || 'candidate';
           setSelectedPlanForCheckout(null);
           setSelectedCreditPackageForCheckout(null);
           setAuthModalRole(target);
@@ -737,12 +817,12 @@ export default function App() {
         onClose={() => setToast((prev) => ({ ...prev, show: false }))}
       />
 
-      {/* Minimalist Single-Row Footer */}
-      <footer className="bg-white border-t border-[#EAECEF] mt-auto">
-        <div className="container-app py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[13px] text-[#64748B]">
+      {/* Cohesive Blue-Tinted Single-Row Footer */}
+      <footer className="bg-[#EEF4FF] border-t border-[#DBEAFE] mt-auto">
+        <div className="container-app py-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-[13px] text-[#475569]">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-[#0F172A]">PrudenEmpregos</span>
-            <span>·</span>
+            <span className="font-bold text-[#1E40AF]">PrudenEmpregos</span>
+            <span className="text-[#93C5FD]">·</span>
             <span>© {new Date().getFullYear()} Presidente Prudente, SP</span>
           </div>
 
@@ -750,51 +830,21 @@ export default function App() {
             <button
               type="button"
               onClick={() => navigateTo('home')}
-              className="hover:text-[#0F172A] transition-colors cursor-pointer"
+              className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
             >
               Vagas
             </button>
             <button
               type="button"
               onClick={() => navigateTo('plans')}
-              className="hover:text-[#0F172A] transition-colors cursor-pointer"
+              className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
             >
-              Planos & Vantagens
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (currentUser && isCandidate(currentUser)) {
-                  navigateTo('candidate', 'resume');
-                } else {
-                  setAuthModalRole('candidate');
-                  setAuthModalMode('register');
-                  setIsAuthModalOpen(true);
-                }
-              }}
-              className="hover:text-[#0F172A] transition-colors cursor-pointer"
-            >
-              Candidatos
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (currentUser && isCompany(currentUser)) {
-                  navigateTo('company', 'post');
-                } else {
-                  setAuthModalRole('company');
-                  setAuthModalMode('register');
-                  setIsAuthModalOpen(true);
-                }
-              }}
-              className="hover:text-[#0F172A] transition-colors cursor-pointer"
-            >
-              Empresas
+              Créditos
             </button>
             <button
               type="button"
               onClick={() => setIsLgpdModalOpen(true)}
-              className="hover:text-[#0F172A] transition-colors cursor-pointer"
+              className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
             >
               Privacidade
             </button>
