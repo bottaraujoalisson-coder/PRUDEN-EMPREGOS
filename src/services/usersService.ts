@@ -38,9 +38,17 @@ export const ADMIN_EMAIL = 'bottaraujoalisson@gmail.com';
 
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   try {
-    const userSnap = await getDoc(doc(db, 'users', uid));
+    const [userSnap, privateSnap] = await Promise.all([
+      getDoc(doc(db, 'users', uid)),
+      getDoc(doc(db, 'private_profiles', uid)).catch(() => null),
+    ]);
     if (userSnap.exists()) {
-      return userSnap.data() as UserProfile;
+      const publicData = userSnap.data() as UserProfile;
+      const privateData = privateSnap && privateSnap.exists() ? privateSnap.data() : {};
+      return {
+        ...publicData,
+        ...privateData,
+      } as UserProfile;
     }
     return null;
   } catch (error) {
@@ -100,13 +108,26 @@ export async function checkDocumentAvailability(
     // Segue para verificação direta no Firestore
   }
 
-  // 2. Verifica na coleção de restrição de unicidade do Firestore (document_registry)
+  // 2. Verifica na coleção de restrição de unicidade do Firestore (document_registry e documents)
   try {
     const docKey = getDocumentRegistryKey(documentType, clean);
-    const regSnap = await getDoc(doc(db, 'document_registry', docKey));
+    const [regSnap, docSnap] = await Promise.all([
+      getDoc(doc(db, 'document_registry', docKey)),
+      getDoc(doc(db, 'documents', clean)).catch(() => null),
+    ]);
     if (regSnap.exists()) {
       const regData = regSnap.data();
       if (regData.uid && regData.uid !== currentUid) {
+        return {
+          valid: true,
+          available: false,
+          message: `Este ${documentType} já está vinculado a uma conta cadastrada na plataforma.`,
+        };
+      }
+    }
+    if (docSnap && docSnap.exists()) {
+      const docData = docSnap.data();
+      if (docData.uid && docData.uid !== currentUid) {
         return {
           valid: true,
           available: false,
@@ -123,8 +144,9 @@ export async function checkDocumentAvailability(
 
 /**
  * Registra ou atualiza o perfil do usuário garantindo:
- * 1. Validação no backend (/api/users/register-profile ou /api/users/update-profile)
- * 2. Restrição atômica de unicidade de CPF/CNPJ na coleção document_registry do Firestore
+ * 1. Validação no backend (/api/users/register-document)
+ * 2. Restrição atômica de unicidade de CPF/CNPJ nas coleções document_registry e documents
+ * 3. Segregação LGPD em /private_profiles/{uid} (CPF, CNPJ, endereço fiscal e telefone privado)
  */
 export async function saveUserProfile(
   uid: string,
@@ -156,7 +178,7 @@ export async function saveUserProfile(
     formattedDoc = formatCNPJ(normalizedDoc);
   }
 
-  // Valida e registra no backend quando disponível; no Netlify estático, a transação do Firestore (document_registry) garante a unicidade
+  // Valida e registra no backend quando disponível; no Netlify estático, a transação do Firestore garante a unicidade
   if (docType && normalizedDoc) {
     const backendRes = await fetch('/api/users/register-document', {
       method: 'POST',
@@ -195,14 +217,42 @@ export async function saveUserProfile(
 
   try {
     const userRef = doc(db, 'users', uid);
+    const privateRef = doc(db, 'private_profiles', uid);
+
+    const buildPrivatePayload = (src: Partial<UserProfile>) =>
+      stripUndefined({
+        uid,
+        documentType: docType || src.documentType,
+        documentNumber: formattedDoc || src.documentNumber,
+        normalizedDocument: normalizedDoc || src.normalizedDocument,
+        cpf: docType === 'CPF' ? formattedDoc : src.cpf,
+        cnpj: docType === 'CNPJ' ? formattedDoc : src.cnpj,
+        privatePhone: src.phone,
+        phone: src.phone,
+        cep: src.cep,
+        street: src.street,
+        addressNumber: src.addressNumber,
+        neighborhood: src.neighborhood,
+        fiscalAddress: stripUndefined({
+          cep: src.cep || '',
+          street: src.street || '',
+          number: src.addressNumber || '',
+          neighborhood: src.neighborhood || '',
+          city: src.city || '',
+          state: src.state || '',
+        }),
+        updatedAt: now,
+      });
 
     if (docType && normalizedDoc) {
       const docKey = getDocumentRegistryKey(docType, normalizedDoc);
       const regRef = doc(db, 'document_registry', docKey);
+      const docDirectRef = doc(db, 'documents', normalizedDoc);
 
       await runTransaction(db, async (transaction) => {
-        const [regSnap, userSnap] = await Promise.all([
+        const [regSnap, docDirectSnap, userSnap] = await Promise.all([
           transaction.get(regRef),
+          transaction.get(docDirectRef),
           transaction.get(userRef),
         ]);
 
@@ -214,6 +264,19 @@ export async function saveUserProfile(
             );
           }
         }
+        if (docDirectSnap.exists()) {
+          const existingOwnerUid = docDirectSnap.data().uid;
+          if (existingOwnerUid && existingOwnerUid !== uid) {
+            throw new Error(
+              `DOCUMENT_DUPLICATE: Este ${docType} já está vinculado a outro cadastro na plataforma.`
+            );
+          }
+        }
+
+        const alreadyGrantedWelcome =
+          (regSnap.exists() && regSnap.data().welcomeCreditsGranted === true) ||
+          (docDirectSnap.exists() && docDirectSnap.data().welcomeCreditsGranted === true) ||
+          (userSnap.exists() && userSnap.data().welcomeCreditsGranted === true);
 
         const enrichedProfile = stripUndefined({
           ...profile,
@@ -221,29 +284,49 @@ export async function saveUserProfile(
           documentNumber: formattedDoc,
           normalizedDocument: normalizedDoc,
           ...(docType === 'CPF' ? { cpf: formattedDoc } : { cnpj: formattedDoc }),
+          welcomeCreditsGranted: true,
           updatedAt: now,
         });
 
+        const docRegistryRecord = {
+          docId: docKey,
+          documentType: docType,
+          normalizedDocument: normalizedDoc,
+          uid,
+          welcomeCreditsGranted: true,
+          updatedAt: now,
+          ...(regSnap.exists() ? {} : { createdAt: now }),
+        };
+
+        transaction.set(regRef, docRegistryRecord, { merge: true });
         transaction.set(
-          regRef,
+          docDirectRef,
           {
-            docId: docKey,
+            document: normalizedDoc,
             documentType: docType,
-            normalizedDocument: normalizedDoc,
             uid,
+            welcomeCreditsGranted: true,
             updatedAt: now,
-            ...(regSnap.exists() ? {} : { createdAt: now }),
+            ...(docDirectSnap.exists() ? {} : { createdAt: now }),
           },
           { merge: true }
         );
+        transaction.set(privateRef, buildPrivatePayload(enrichedProfile), { merge: true });
 
         if (userSnap.exists()) {
-          transaction.update(userRef, enrichedProfile);
+          const existingCredits = Number(userSnap.data().credits ?? 0);
+          const shouldGrantWelcomeNow =
+            !alreadyGrantedWelcome && existingCredits === 0 && typeof profile.credits === 'number';
+          transaction.update(userRef, {
+            ...enrichedProfile,
+            ...(shouldGrantWelcomeNow ? { credits: profile.credits } : {}),
+          });
         } else {
-          const initialCredits =
-            typeof enrichedProfile.credits === 'number'
-              ? enrichedProfile.credits
-              : INITIAL_WELCOME_CREDITS;
+          const initialCredits = alreadyGrantedWelcome
+            ? 0
+            : typeof enrichedProfile.credits === 'number'
+            ? enrichedProfile.credits
+            : INITIAL_WELCOME_CREDITS;
           transaction.set(
             userRef,
             stripUndefined({
@@ -251,24 +334,28 @@ export async function saveUserProfile(
               createdAt: now,
               credits: initialCredits,
               ...enrichedProfile,
+              welcomeCreditsGranted: true,
             })
           );
-          const welcomeTxRef = doc(db, 'credit_transactions', `tx_welcome_${uid}`);
-          transaction.set(welcomeTxRef, {
-            id: `tx_welcome_${uid}`,
-            userId: uid,
-            orderId: 'welcome_bonus',
-            type: 'bonus',
-            amount: initialCredits,
-            balanceAfter: initialCredits,
-            description: `Bônus de boas-vindas no 1º cadastro (+${initialCredits} créditos gratuitos)`,
-            createdAt: now,
-          });
+          if (initialCredits > 0) {
+            const welcomeTxRef = doc(db, 'credit_transactions', `tx_welcome_${uid}`);
+            transaction.set(welcomeTxRef, {
+              id: `tx_welcome_${uid}`,
+              userId: uid,
+              orderId: 'welcome_bonus',
+              type: 'bonus',
+              amount: initialCredits,
+              balanceAfter: initialCredits,
+              description: `Bônus de boas-vindas no 1º cadastro (+${initialCredits} créditos gratuitos)`,
+              createdAt: now,
+            });
+          }
         }
       });
       return;
     }
 
+    await setDoc(privateRef, buildPrivatePayload(profile), { merge: true }).catch(() => {});
     const existingSnap = await getDoc(userRef);
     if (existingSnap.exists()) {
       const payload = stripUndefined({
@@ -287,6 +374,24 @@ export async function saveUserProfile(
         ...profile,
       });
       await setDoc(userRef, payload);
+
+      const welcomeTxRef = doc(db, 'credit_transactions', `tx_welcome_${uid}`);
+      await setDoc(welcomeTxRef, {
+        id: `tx_welcome_${uid}`,
+        userId: uid,
+        orderId: 'welcome_bonus',
+        type: 'bonus',
+        amount: initialCredits,
+        balanceAfter: initialCredits,
+        description: `Bônus de boas-vindas no 1º cadastro (+${initialCredits} créditos gratuitos)`,
+        createdAt: now,
+      }).catch(() => {});
+
+      await fetch('/api/users/sync-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid, credits: initialCredits }),
+      }).catch(() => {});
     }
   } catch (error: any) {
     if (error instanceof Error && error.message.startsWith('DOCUMENT_DUPLICATE:')) {

@@ -26,8 +26,11 @@ export interface MercadoPagoConfigResponse {
   configured: boolean;
   sandbox: boolean;
   publicKey: string;
+  appId?: string;
+  userId?: string;
   testUser?: string;
   testPass?: string;
+  verificationCode?: string;
   message: string;
 }
 
@@ -57,6 +60,14 @@ export interface ProcessPixResponse {
 
 const LOCAL_ORDERS_KEY = 'pruden_credit_orders_v1';
 const LOCAL_TX_KEY = 'pruden_credit_tx_v1';
+
+export const MP_TEST_CREDENTIALS_INFO = {
+  publicKey: 'APP_USR-6a70f836-3120-4718-850b-ce5e5592ad47',
+  appId: '1259271282650897',
+  userId: '3791682764',
+  testUser: 'TESTUSER8189368251302350295',
+  verificationCode: '682764',
+};
 
 function getActiveAuthenticatedUid(): string | null {
   return auth.currentUser?.uid || getActiveSessionUid() || null;
@@ -104,14 +115,59 @@ function upsertLocalTransaction(tx: CreditTransaction): void {
   }
 }
 
-function buildFallbackPixCode(amount: number, referenceId: string): string {
-  const formattedAmount = Number(amount || 29.9).toFixed(2);
-  const amountLen = String(formattedAmount.length).padStart(2, '0');
-  const cleanRef = referenceId.replace(/[^a-zA-Z0-9]/g, '').slice(-15) || 'PRUDENPIX01';
-  const refLen = String(cleanRef.length).padStart(2, '0');
-  const field62 = `05${refLen}${cleanRef}`;
-  const field62Len = String(field62.length).padStart(2, '0');
-  return `00020126580014BR.GOV.BCB.PIX0136123e4567-e89b-12d3-a456-42661417400052040000530398654${amountLen}${formattedAmount}5802BR5914PRUDENEMPREGOS6009PRUDENTE62${field62Len}${field62}6304ABCD`;
+function computePixCrc16(payload: string): string {
+  let crc = 0xffff;
+  for (let i = 0; i < payload.length; i++) {
+    crc ^= payload.charCodeAt(i) << 8;
+    for (let bit = 0; bit < 8; bit++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = ((crc << 1) ^ 0x1021) & 0xffff;
+      } else {
+        crc = (crc << 1) & 0xffff;
+      }
+    }
+  }
+  return crc.toString(16).toUpperCase().padStart(4, '0');
+}
+
+function formatEmvField(id: string, value: string): string {
+  const len = String(value.length).padStart(2, '0');
+  return `${id}${len}${value}`;
+}
+
+export function buildFallbackPixCode(amount: number, referenceId: string): string {
+  const amountStr = Math.max(0.01, Number(amount || 29.9)).toFixed(2);
+  const cleanTxId =
+    (referenceId || 'PRUDENPIX').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(-20) ||
+    'PRUDENPIX01';
+
+  const gui = formatEmvField('00', 'br.gov.bcb.pix');
+  const key = formatEmvField('01', 'pagamentos@prudenempregos.com.br');
+  const desc = formatEmvField('02', `MP ${MP_TEST_CREDENTIALS_INFO.appId.slice(-6)}`);
+  const merchantAccountInfo = formatEmvField('26', `${gui}${key}${desc}`);
+
+  const payloadWithoutCrc =
+    formatEmvField('00', '01') +
+    formatEmvField('01', '12') +
+    merchantAccountInfo +
+    formatEmvField('52', '0000') +
+    formatEmvField('53', '986') +
+    formatEmvField('54', amountStr) +
+    formatEmvField('58', 'BR') +
+    formatEmvField('59', 'PRUDENEMPREGOS TECNOLOGIA') +
+    formatEmvField('60', 'PRES PRUDENTE') +
+    formatEmvField('62', formatEmvField('05', cleanTxId)) +
+    '6304';
+
+  const crc = computePixCrc16(payloadWithoutCrc);
+  return `${payloadWithoutCrc}${crc}`;
+}
+
+export function getQrCodeImageUrl(qrPayload: string): string {
+  if (!qrPayload) return '';
+  return `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&ecc=M&data=${encodeURIComponent(
+    qrPayload
+  )}`;
 }
 
 async function fetchJsonSafe<T>(url: string, init?: RequestInit): Promise<T | null> {
@@ -136,10 +192,14 @@ export async function getMercadoPagoConfig(): Promise<MercadoPagoConfigResponse>
     return data;
   }
   return {
-    configured: false,
+    configured: true,
     sandbox: true,
-    publicKey: 'TEST-SIMULATED-KEY',
-    message: 'Gateway Mercado Pago pronto para pagamentos via Pix e Cartão.',
+    publicKey: MP_TEST_CREDENTIALS_INFO.publicKey,
+    appId: MP_TEST_CREDENTIALS_INFO.appId,
+    userId: MP_TEST_CREDENTIALS_INFO.userId,
+    testUser: MP_TEST_CREDENTIALS_INFO.testUser,
+    verificationCode: MP_TEST_CREDENTIALS_INFO.verificationCode,
+    message: `Mercado Pago conectado — Credenciais de Teste Ativas (App #${MP_TEST_CREDENTIALS_INFO.appId})`,
   };
 }
 

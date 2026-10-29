@@ -20,6 +20,7 @@ import {
   isCompany,
 } from '../utils/matchAlgorithm';
 import { APPLY_JOB_CREDIT_COST } from '../utils/creditsData';
+import { EXPANDED_JOB_CATEGORIES, CONTRACT_FILTER_PILLS } from '../constants/credits';
 
 interface HomeViewProps {
   jobs: Job[];
@@ -87,6 +88,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [sortBy, setSortBy] = useState<'recent' | 'salary'>('recent');
   const [visibleCount, setVisibleCount] = useState(12);
   const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
+
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setDebouncedSearchTerm('');
+      return;
+    }
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const searchInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const userIsCandidate = isCandidate(currentUser);
   const userIsCompany = isCompany(currentUser);
@@ -117,7 +132,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     const newUrl = queryString
       ? `${window.location.pathname}?${queryString}`
       : window.location.pathname;
-    window.history.replaceState(null, '', newUrl);
+    window.history.replaceState({}, '', newUrl);
   }, [searchTerm, filterCity, filterCategory, filterContract, filterWorkModel]);
 
   useEffect(() => {
@@ -133,9 +148,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   const categories = useMemo(() => {
     const defaultCats = [
+      ...EXPANDED_JOB_CATEGORIES,
       'Administrativo',
+      'Comércio',
       'Comercial',
       'Tecnologia',
+      'Primeiro Emprego',
       'Saúde',
       'Agronegócio',
       'Indústria',
@@ -165,9 +183,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
       s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
     const filtered = activeJobs.filter((job) => {
-      const searchStr = norm(searchTerm);
+      const searchStr = norm(debouncedSearchTerm.trim());
+      const firstJobTokens =
+        job.acceptsFirstJob || job.experience === 'Primeiro Emprego' || job.category === 'Primeiro Emprego'
+          ? 'primeiro emprego jovem aprendiz estagio iniciante'
+          : '';
+      const comercioTokens =
+        job.category === 'Comércio' || job.category === 'Comercial'
+          ? 'comercio comercial vendas'
+          : '';
       const jobStr = norm(
-        `${job.title} ${job.companyName} ${job.category ?? ''} ${job.skills?.join(' ') ?? ''} ${job.location} ${job.description}`
+        `${job.title} ${job.companyName} ${job.category ?? ''} ${job.contract ?? ''} ${job.experience ?? ''} ${firstJobTokens} ${comercioTokens} ${job.skills?.join(' ') ?? ''} ${job.location} ${job.description}`
       );
       const matchesSearch = !searchStr || jobStr.includes(searchStr);
 
@@ -178,7 +204,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
         norm(job.location ?? '').includes(norm(filterCity.replace(', SP', '')));
 
       const matchesCategory =
-        filterCategory === 'Todas as Áreas' || job.category === filterCategory;
+        filterCategory === 'Todas as Áreas' ||
+        job.category === filterCategory ||
+        (filterCategory === 'Comércio' && job.category === 'Comercial') ||
+        (filterCategory === 'Comercial' && job.category === 'Comércio') ||
+        (filterCategory === 'Primeiro Emprego' &&
+          (job.category === 'Primeiro Emprego' ||
+            Boolean(job.acceptsFirstJob) ||
+            job.experience === 'Primeiro Emprego'));
 
       const matchesContract =
         filterContract === 'Todos os Contratos' || job.contract === filterContract;
@@ -203,7 +236,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
       const matchesFirstJob =
         !filterFirstJob ||
         Boolean(job.acceptsFirstJob) ||
-        job.experience === 'Primeiro Emprego';
+        job.experience === 'Primeiro Emprego' ||
+        job.category === 'Primeiro Emprego';
 
       const jobCnh = job.requiresCnh ?? 'nao';
       const matchesCnh =
@@ -245,7 +279,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     });
   }, [
     activeJobs,
-    searchTerm,
+    debouncedSearchTerm,
     filterCity,
     filterCategory,
     filterContract,
@@ -280,6 +314,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const hasActiveFilters = activeFilterCount > 0 || searchTerm.trim().length > 0;
 
   const clearFilters = () => {
+    setSearchTerm('');
+    setDebouncedSearchTerm('');
+    if (searchInputRef.current) {
+      searchInputRef.current.value = '';
+    }
     setFilterCity(DEFAULT_CITY_LABEL);
     setFilterCategory('Todas as Áreas');
     setFilterContract('Todos os Contratos');
@@ -289,8 +328,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
     setFilterFirstJob(false);
     setFilterCnh('Todas');
     setFilterVehicle('Todos');
-    setSearchTerm('');
     setVisibleCount(12);
+    window.history.replaceState({}, '', window.location.pathname);
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -304,8 +343,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const handleQuickChipClick = (chipValue: string) => {
     if (searchTerm.toLowerCase() === chipValue.toLowerCase()) {
       setSearchTerm('');
+      setDebouncedSearchTerm('');
     } else {
       setSearchTerm(chipValue);
+      setDebouncedSearchTerm(chipValue);
     }
   };
 
@@ -319,9 +360,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   const handleJobAlertCta = () => {
     if (userIsCandidate && currentUser) {
-      showToast?.(
-        'Alerta ativo! Você será avisado assim que novas vagas em Presidente Prudente forem publicadas.'
-      );
+      onNavigate('candidate', 'alerts');
       return;
     }
     showToast?.(
@@ -332,15 +371,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   return (
     <main className="min-h-screen bg-[#F4F7FE]">
-      {/* 1. HERO EM AZUL COM TRANSIÇÃO SUAVE */}
-      <section className="bg-gradient-to-b from-[#1E40AF] to-[#2563EB] text-white border-b border-[#1D4ED8]">
-        <div className="container-app pt-8 pb-8 md:pt-12 md:pb-10">
+      {/* 1. HERO EM AZUL COM TRANSIÇÃO SUAVE E FOLGA CONTRA HEADER FIXO */}
+      <section
+        id="hero-section"
+        className="bg-gradient-to-b from-[#1E40AF] to-[#2563EB] text-white border-b border-[#1D4ED8] scroll-mt-24"
+      >
+        <div className="container-app pt-14 pb-10 md:pt-20 md:pb-12">
           <div className="max-w-2xl mb-6">
-            <h1 className="text-[28px] sm:text-[34px] md:text-[38px] font-bold text-white leading-[1.15] tracking-[-0.03em] [text-wrap:balance]">
+            <h1 className="text-[28px] sm:text-[34px] md:text-[38px] font-bold text-white leading-[1.18] tracking-[-0.03em] [text-wrap:balance]">
               Encontre sua próxima vaga em Presidente Prudente.
             </h1>
 
-            <div className="mt-3 flex flex-wrap items-center gap-2.5">
+            <div className="mt-3.5 flex flex-wrap items-center gap-2.5">
               <div className="inline-flex items-start sm:items-center gap-2.5 p-2.5 sm:px-3.5 sm:py-2 rounded-xl bg-white/12 border border-white/20 text-blue-50">
                 <span className="w-6 h-6 rounded-lg bg-white/15 text-sky-300 inline-flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">
                   <Zap className="w-3.5 h-3.5" />
@@ -373,6 +415,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div className="flex-1 flex items-center px-3.5 min-h-[44px]">
               <Search className="w-4 h-4 text-[#2563EB] mr-2.5 shrink-0" />
               <input
+                ref={searchInputRef}
                 type="search"
                 aria-label="Cargo, área ou habilidade"
                 placeholder="Cargo, área ou habilidade..."
@@ -383,7 +426,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
               {searchTerm && (
                 <button
                   type="button"
-                  onClick={() => setSearchTerm('')}
+                  onClick={() => {
+                    setSearchTerm('');
+                    if (searchInputRef.current) searchInputRef.current.value = '';
+                  }}
                   aria-label="Limpar termo de busca"
                   className="w-7 h-7 inline-flex items-center justify-center text-[#64748B] hover:text-[#1D4ED8] rounded-md cursor-pointer"
                 >
@@ -418,38 +464,36 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </button>
           </form>
 
-          {/* 3. CHIPS LEVES DE SUGESTÃO RÁPIDA (exibidos apenas quando não há filtros de vagas ativas) */}
-          {activeJobs.length === 0 && (
-            <div className="mt-3.5 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pb-0.5">
-              <span className="text-[12px] font-medium text-blue-100 shrink-0">
-                Áreas rápidas:
-              </span>
-              {QUICK_SUGGESTION_CHIPS.map((chip) => {
-                const isSelected = searchTerm.toLowerCase() === chip.value.toLowerCase();
-                return (
-                  <button
-                    key={chip.label}
-                    type="button"
-                    onClick={() => handleQuickChipClick(chip.value)}
-                    aria-pressed={isSelected}
-                    className={`h-8 px-3 rounded-lg text-[12px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                      isSelected
-                        ? 'bg-white text-[#1E40AF] border-white font-semibold'
-                        : 'bg-white/10 text-blue-50 border-white/20 hover:bg-white/20'
-                    }`}
-                  >
-                    {chip.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* 3. CHIPS LEVES DE SUGESTÃO RÁPIDA ("Áreas rápidas") SEMPRE DISPONÍVEIS */}
+          <div className="mt-3.5 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pb-0.5">
+            <span className="text-[12px] font-medium text-blue-100 shrink-0">
+              Áreas rápidas:
+            </span>
+            {QUICK_SUGGESTION_CHIPS.map((chip) => {
+              const isSelected = searchTerm.trim().toLowerCase() === chip.value.toLowerCase();
+              return (
+                <button
+                  key={chip.label}
+                  type="button"
+                  onClick={() => handleQuickChipClick(chip.value)}
+                  aria-pressed={isSelected}
+                  className={`h-8 px-3 rounded-lg text-[12px] font-medium border transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                    isSelected
+                      ? 'bg-white text-[#1E40AF] border-white font-semibold'
+                      : 'bg-white/10 text-blue-50 border-white/20 hover:bg-white/20'
+                  }`}
+                >
+                  {chip.label}
+                </button>
+              );
+            })}
+          </div>
 
           {/* FILTROS RÁPIDOS UNIFICADOS */}
           {activeJobs.length > 0 && (
             <div
               aria-label="Filtros rápidos"
-              className="mt-3.5 flex flex-nowrap md:flex-wrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="mt-3 flex flex-nowrap md:flex-wrap items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               <select
                 aria-label="Filtrar por área profissional"
@@ -517,6 +561,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <option value="Temporário" className="bg-white text-[#0F172A]">
                   Temporário
                 </option>
+                <option value="Freelancer" className="bg-white text-[#0F172A]">
+                  Freelancer
+                </option>
                 <option value="Jovem Aprendiz" className="bg-white text-[#0F172A]">
                   Jovem Aprendiz
                 </option>
@@ -571,7 +618,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   className="h-9 px-2.5 text-[13px] font-medium text-blue-100 hover:text-white inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0"
                 >
                   <X className="w-3.5 h-3.5" />
-                  <span>Limpar</span>
+                  <span>Limpar filtros</span>
                 </button>
               )}
             </div>
@@ -682,7 +729,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 onClick={clearFilters}
                 className="btn-base btn-md btn-secondary flex-1"
               >
-                Limpar
+                Limpar filtros
               </button>
               <button
                 type="button"
@@ -697,8 +744,49 @@ export const HomeView: React.FC<HomeViewProps> = ({
       )}
 
       {/* Clean Single-Column Job Feed */}
-      <section id="oportunidades-mural" className="container-app py-8 md:py-10">
-        <div className="flex items-center justify-between gap-4 mb-4">
+      <section id="oportunidades-mural" className="container-app py-8 md:py-10 scroll-mt-24">
+        {/* Pills Rápidas de Tipo de Contrato / Modalidade (Módulo 5.4) */}
+        {activeJobs.length > 0 && (
+          <div className="mb-5 flex items-center gap-2 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden pb-1">
+            {CONTRACT_FILTER_PILLS.map((pill) => {
+              const isSelected =
+                pill.value === 'Todos os Contratos'
+                  ? filterContract === 'Todos os Contratos' && !filterFirstJob
+                  : pill.value === 'Primeiro Emprego'
+                  ? filterFirstJob
+                  : filterContract === pill.value;
+              return (
+                <button
+                  key={pill.value}
+                  type="button"
+                  onClick={() => {
+                    if (pill.value === 'Todos os Contratos') {
+                      setFilterContract('Todos os Contratos');
+                      setFilterFirstJob(false);
+                    } else if (pill.value === 'Primeiro Emprego') {
+                      setFilterFirstJob((prev) => !prev);
+                      setFilterContract('Todos os Contratos');
+                    } else {
+                      setFilterFirstJob(false);
+                      setFilterContract((prev) =>
+                        prev === pill.value ? 'Todos os Contratos' : pill.value
+                      );
+                    }
+                  }}
+                  className={`h-8 px-3.5 rounded-full text-[12px] font-semibold border transition-colors cursor-pointer shrink-0 ${
+                    isSelected
+                      ? 'bg-[#1D4ED8] text-white border-[#1D4ED8] shadow-xs'
+                      : 'bg-white text-[#475569] border-[#E2E8F0] hover:border-[#93C5FD] hover:text-[#1E40AF]'
+                  }`}
+                >
+                  {pill.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div id="vagas" className="scroll-mt-24 flex items-center justify-between gap-4 mb-4">
           <div className="flex items-baseline gap-2">
             <h2 className="text-[16px] font-semibold text-[#0F172A]">
               Vagas disponíveis
@@ -770,7 +858,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             ) : (
               <div className="max-w-md mx-auto">
                 <h3 className="text-[16px] font-semibold text-[#0F172A] mb-1">
-                  Nenhuma vaga encontrada para estes filtros
+                  Nenhuma vaga encontrada para estes filtros.
                 </h3>
                 <p className="text-[14px] text-[#64748B] mb-5">
                   Reduza os filtros ativos ou pesquise por outro termo para ampliar suas opções.
@@ -780,7 +868,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onClick={clearFilters}
                   className="btn-base btn-sm btn-secondary"
                 >
-                  Limpar filtros
+                  Limpar todos os filtros
                 </button>
               </div>
             )}
@@ -792,14 +880,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               const isSaved = savedJobIds.includes(job.id);
               const isOwnCompanyJob =
                 userIsCompany && currentUser && job.companyId === currentUser.uid;
-              const rawRange = (job.salaryRange || '').trim().toLowerCase();
-              const hasSalary =
-                Boolean(job.salaryMin) ||
-                Boolean(job.salaryMax) ||
-                (Boolean(rawRange) &&
-                  !rawRange.includes('combinar') &&
-                  job.salaryType !== 'negotiable');
-              const formattedSalary = hasSalary ? formatJobSalary(job) : null;
+              const formattedSalary = formatJobSalary(job);
               const canOneClickApply =
                 userIsCandidate &&
                 !isApplied &&
@@ -807,6 +888,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
               const metadataParts = [
                 job.companyName,
+                job.category,
                 job.location,
                 job.workModel,
                 job.contract,
@@ -842,7 +924,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         </h3>
                         {job.featured && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
-                            <Sparkles className="w-3 h-3" /> Vaga Destacada
+                            <Sparkles className="w-3 h-3" /> ★ Vaga Destacada
                           </span>
                         )}
                         {isApplied && (
@@ -861,14 +943,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
                             </span>
                           </React.Fragment>
                         ))}
-                        {formattedSalary && (
-                          <>
-                            <span className="mx-1.5 text-[#CBD5E1]">·</span>
-                            <span className="font-semibold text-[#059669] tabular-nums">
-                              {formattedSalary}
-                            </span>
-                          </>
-                        )}
+                        <span className="mx-1.5 text-[#CBD5E1]">·</span>
+                        <span className="font-semibold text-[#059669] tabular-nums">
+                          {formattedSalary}
+                        </span>
                       </p>
                     </div>
                   </div>

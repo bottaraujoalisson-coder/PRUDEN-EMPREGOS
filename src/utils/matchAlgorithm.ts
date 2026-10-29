@@ -173,9 +173,16 @@ export function calculateDetailedMatchAnalysis(
   const jobExp = (job.experience && EXP_LEVELS[job.experience]) || 0;
   let experienceScore = 70;
 
-  if (job.experience === 'Qualquer Nível' || job.acceptsFirstJob) {
-    experienceScore = candExp > 0 ? 95 : 85;
-    strengths.push('Nível de senioridade compatível com os requisitos da oportunidade');
+  if (
+    job.experience === 'Qualquer Nível' ||
+    job.experience === 'Primeiro Emprego' ||
+    job.experience === 'Estágio' ||
+    job.contract === 'Estágio' ||
+    job.contract === 'Jovem Aprendiz' ||
+    job.acceptsFirstJob
+  ) {
+    experienceScore = 100;
+    strengths.push('Nível de senioridade 100% compatível com a oportunidade (Primeiro Emprego / Estágio)');
   } else if (candExp > 0 && jobExp > 0) {
     const diff = candExp - jobExp;
     if (diff === 0) {
@@ -286,9 +293,9 @@ export const calculateIntelligentMatch = (
 };
 
 export const getMatchColor = (score: number) => {
-  if (score >= 75) return 'text-[#16835D] bg-[#ECFDF5] border-[#16835D]/25';
-  if (score >= 50) return 'text-[#173B70] bg-[#EFF4FF] border-[#173B70]/20';
-  return 'text-[#64748B] bg-[#F3F5F8] border-[#E2E8F0]';
+  if (score >= 75) return 'text-[#059669] bg-[#ECFDF5] border-[#A7F3D0]';
+  if (score >= 50) return 'text-[#1D4ED8] bg-[#EFF6FF] border-[#BFDBFE]';
+  return 'text-[#B45309] bg-[#FEF3C7] border-[#FDE68A]';
 };
 
 export const formatDate = (isoString?: string) => {
@@ -562,12 +569,55 @@ export function calculateRenewedExpiresAt(
   return renewed.toISOString();
 }
 
-// --- MÓDULO 5: FAIXA SALARIAL FLEXÍVEL ---
+// --- MÓDULO 5: FAIXA SALARIAL FLEXÍVEL & FORMATAÇÃO MONETÁRIA BRL ---
+const brlCurrencyFormatter = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+export function formatSalaryBRL(value?: string | number | null): string {
+  if (value === null || value === undefined) return 'Salário a combinar';
+
+  if (typeof value === 'number') {
+    if (isNaN(value) || value <= 0) return 'Salário a combinar';
+    return brlCurrencyFormatter.format(value).replace(/\u00a0/g, ' ');
+  }
+
+  const trimmed = String(value).trim();
+  if (!trimmed || trimmed.toLowerCase().includes('combinar')) {
+    return 'Salário a combinar';
+  }
+
+  // If raw numeric string like "2500" or "2500.50" or "2500,00"
+  if (/^\d+([.,]\d{1,2})?$/.test(trimmed)) {
+    const parsed = Number(trimmed.replace(',', '.'));
+    if (!isNaN(parsed) && parsed > 0) {
+      return brlCurrencyFormatter.format(parsed).replace(/\u00a0/g, ' ');
+    }
+  }
+
+  // If string starts with raw number followed by suffix like "2200 + comissão"
+  const rawPrefixMatch = trimmed.match(/^(\d{3,6})\s*(\+.*)$/);
+  if (rawPrefixMatch) {
+    const numPart = Number(rawPrefixMatch[1]);
+    if (!isNaN(numPart) && numPart > 0) {
+      return `${brlCurrencyFormatter.format(numPart).replace(/\u00a0/g, ' ')} ${rawPrefixMatch[2]}`;
+    }
+  }
+
+  return trimmed;
+}
+
 export function formatCurrencyBRL(value: number, showDecimals: boolean = false): string {
   if (isNaN(value) || value <= 0) return '';
+  if (showDecimals) {
+    return brlCurrencyFormatter.format(value).replace(/\u00a0/g, ' ');
+  }
   return `R$ ${value.toLocaleString('pt-BR', {
-    minimumFractionDigits: showDecimals ? 2 : 0,
-    maximumFractionDigits: showDecimals ? 2 : 0,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   })}`;
 }
 
@@ -576,6 +626,17 @@ export function formatJobSalary(job?: Partial<Job> | null): string {
 
   if (job.salaryType === 'negotiable') {
     return 'Salário a combinar';
+  }
+
+  if (job.salaryRange && job.salaryRange.trim().length > 0) {
+    const formattedRange = formatSalaryBRL(job.salaryRange);
+    // If salaryRange explicitly has suffix like "+ comissão" or if salaryType is not range/exact, return formattedRange
+    if (
+      formattedRange.toLowerCase().includes('comiss') ||
+      (!job.salaryType && formattedRange !== 'Salário a combinar')
+    ) {
+      return formattedRange;
+    }
   }
 
   if (job.salaryType === 'range') {
@@ -595,12 +656,16 @@ export function formatJobSalary(job?: Partial<Job> | null): string {
   if (job.salaryType === 'exact') {
     const exact = job.salaryMin ?? 0;
     if (exact > 0) {
-      return formatCurrencyBRL(exact, true);
+      return formatSalaryBRL(exact);
     }
   }
 
   if (job.salaryRange && job.salaryRange.trim().length > 0) {
-    return job.salaryRange.trim();
+    return formatSalaryBRL(job.salaryRange);
+  }
+
+  if (job.salaryMin && job.salaryMin > 0) {
+    return formatSalaryBRL(job.salaryMin);
   }
 
   return 'Salário a combinar';

@@ -55,10 +55,21 @@ export default function App() {
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('autostart') === '1';
 
+  const getInitialViewFromUrl = (): 'home' | 'candidate' | 'company' | 'admin' | 'plans' => {
+    if (typeof window === 'undefined') return 'home';
+    if (isAutostartCandidate) return 'candidate';
+    const path = window.location.pathname.toLowerCase();
+    if (path === '/planos' || path === '/creditos') return 'plans';
+    if (path === '/candidato' || path === '/painel/candidato') return 'candidate';
+    if (path === '/empresa' || path === '/painel/empresa') return 'company';
+    if (path === '/admin') return 'admin';
+    return 'home';
+  };
+
   const [currentView, setCurrentView] = useState<'home' | 'candidate' | 'company' | 'admin' | 'plans'>(
-    isAutostartCandidate ? 'candidate' : 'home'
+    getInitialViewFromUrl
   );
-  const [candidateSubTab, setCandidateSubTab] = useState<'applications' | 'resume' | 'saved'>('applications');
+  const [candidateSubTab, setCandidateSubTab] = useState<'applications' | 'resume' | 'saved' | 'alerts'>('applications');
   const [companySubTab, setCompanySubTab] = useState<'jobs' | 'candidates' | 'post' | 'credits'>('jobs');
   const [selectedPlanForCheckout, setSelectedPlanForCheckout] = useState<{ plan: PricingPlan; period: PlanPeriod } | null>(null);
   const [selectedCreditPackageForCheckout, setSelectedCreditPackageForCheckout] = useState<CreditPackage | null>(null);
@@ -119,6 +130,7 @@ export default function App() {
     title: string;
   } | null>(null);
   const [isLgpdModalOpen, setIsLgpdModalOpen] = useState(false);
+  const [institutionalModal, setInstitutionalModal] = useState<'about' | 'terms' | null>(null);
 
   // Toast notifications
   const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' }>({
@@ -184,7 +196,12 @@ export default function App() {
     }
 
     if (view === 'candidate' && subTab) {
-      if (subTab === 'applications' || subTab === 'resume' || subTab === 'saved') {
+      if (
+        subTab === 'applications' ||
+        subTab === 'resume' ||
+        subTab === 'saved' ||
+        subTab === 'alerts'
+      ) {
         setCandidateSubTab(subTab);
       }
     }
@@ -196,16 +213,150 @@ export default function App() {
     }
 
     setCurrentView(view as any);
+    if (typeof window !== 'undefined') {
+      const targetPath =
+        view === 'plans'
+          ? '/planos'
+          : view === 'candidate'
+          ? '/candidato'
+          : view === 'company'
+          ? '/empresa'
+          : view === 'admin'
+          ? '/admin'
+          : '/';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState({ view, subTab }, '', targetPath);
+      }
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // 1. Listen for Real-Time Jobs
+  // Sincroniza botão Voltar / Avançar do navegador (popstate)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      const path = window.location.pathname.toLowerCase();
+      const params = new URLSearchParams(window.location.search);
+      const vagaParam = params.get('vaga');
+      const vagaPathMatch = window.location.pathname.match(/^\/vaga\/([^/]+)$/i);
+      const targetJobId = vagaParam || (vagaPathMatch ? vagaPathMatch[1] : null);
+
+      if (targetJobId && jobs.length > 0) {
+        const found = jobs.find((j) => j.id === targetJobId);
+        if (found) {
+          setSelectedJobForDetails(found);
+          setCurrentView('home');
+          return;
+        }
+      } else {
+        setSelectedJobForDetails(null);
+      }
+
+      if (path === '/planos' || path === '/creditos') {
+        setCurrentView('plans');
+      } else if (path === '/candidato' || path === '/painel/candidato') {
+        setCurrentView('candidate');
+      } else if (path === '/empresa' || path === '/painel/empresa') {
+        setCurrentView('company');
+      } else if (path === '/admin') {
+        setCurrentView('admin');
+      } else {
+        setCurrentView('home');
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [jobs]);
+
+  // 1. Listen for Real-Time Jobs & Deep Link Opening (/vaga/:id or /?vaga=:id)
   useEffect(() => {
     const unsubscribe = subscribeJobs((loadedJobs) => {
       setJobs(loadedJobs);
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const vagaParam = params.get('vaga');
+        const vagaPathMatch = window.location.pathname.match(/^\/vaga\/([^/]+)$/i);
+        const targetJobId = vagaParam || (vagaPathMatch ? vagaPathMatch[1] : null);
+        if (targetJobId) {
+          const found = loadedJobs.find((j) => j.id === targetJobId);
+          if (found) {
+            setSelectedJobForDetails(found);
+          }
+        }
+      }
     });
     return () => unsubscribe();
   }, []);
+
+  // 1.1 Inject Dynamic Schema.org JobPosting JSON-LD for Google Jobs Local SEO
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const activeJobsList = jobs.filter((j) => !j.status || j.status === 'active').slice(0, 10);
+    const employmentTypeMap: Record<string, string> = {
+      CLT: 'FULL_TIME',
+      PJ: 'CONTRACTOR',
+      Estágio: 'INTERN',
+      Temporário: 'TEMPORARY',
+      'Jovem Aprendiz': 'PART_TIME',
+    };
+
+    const jobPostingsGraph = activeJobsList.map((job) => {
+      const locality = (job.location || 'Presidente Prudente, SP').split(',')[0].trim();
+      const item: Record<string, any> = {
+        '@context': 'https://schema.org/',
+        '@type': 'JobPosting',
+        title: job.title,
+        description: job.description,
+        datePosted: job.createdAt || new Date().toISOString(),
+        validThrough:
+          job.expiresAt || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+        employmentType: employmentTypeMap[job.contract] || 'FULL_TIME',
+        hiringOrganization: {
+          '@type': 'Organization',
+          name: job.companyName,
+          sameAs: 'https://prudenempregos.com.br',
+        },
+        jobLocation: {
+          '@type': 'Place',
+          address: {
+            '@type': 'PostalAddress',
+            addressLocality: locality || 'Presidente Prudente',
+            addressRegion: 'SP',
+            addressCountry: 'BR',
+          },
+        },
+      };
+      if (job.workModel === 'Remoto') {
+        item.jobLocationType = 'TELECOMMUTE';
+      }
+      if (job.salaryMin || job.salaryMax) {
+        item.baseSalary = {
+          '@type': 'MonetaryAmount',
+          currency: 'BRL',
+          value: {
+            '@type': 'QuantitativeValue',
+            value: job.salaryMin || job.salaryMax,
+            minValue: job.salaryMin || job.salaryMax,
+            maxValue: job.salaryMax || job.salaryMin,
+            unitText: 'MONTH',
+          },
+        };
+      }
+      return item;
+    });
+
+    let scriptEl = document.getElementById('dynamic-jobs-jsonld') as HTMLScriptElement | null;
+    if (!scriptEl) {
+      scriptEl = document.createElement('script');
+      scriptEl.id = 'dynamic-jobs-jsonld';
+      scriptEl.type = 'application/ld+json';
+      document.head.appendChild(scriptEl);
+    }
+    scriptEl.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@graph': jobPostingsGraph,
+    });
+  }, [jobs]);
 
   // 2. Listen to Firebase Auth
   useEffect(() => {
@@ -230,10 +381,29 @@ export default function App() {
               setCurrentUser(profile);
             }
           } else if (!isAuthModalOpenRef.current) {
-            await signOut(auth);
-            setActiveSessionUid(null);
-            setCurrentUser(null);
-            setIsAdmin(false);
+            const adminCheck = await checkIsAdmin(firebaseUser.uid, firebaseUser.email);
+            const now = new Date().toISOString();
+            const fallbackName =
+              firebaseUser.displayName ||
+              (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Usuário');
+            const autoProfile: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              name: fallbackName,
+              type: adminCheck ? 'admin' : 'candidate',
+              city: 'Presidente Prudente, SP',
+              state: 'SP',
+              skills: [],
+              credits: INITIAL_WELCOME_CREDITS,
+              profileCompleteness: 40,
+              savedJobIds: [],
+              isVerified: true,
+              createdAt: now,
+              updatedAt: now,
+            };
+            await saveUserProfile(firebaseUser.uid, autoProfile);
+            setIsAdmin(adminCheck);
+            setCurrentUser(autoProfile);
           }
         } catch (err) {
           console.error('Error fetching user profile:', err);
@@ -573,7 +743,14 @@ export default function App() {
             searchTerm={searchTerm}
             setSearchTerm={setSearchTerm}
             onApply={handleApply}
-            onViewJobDetails={(job) => setSelectedJobForDetails(job)}
+            onViewJobDetails={(job) => {
+              setSelectedJobForDetails(job);
+              if (typeof window !== 'undefined') {
+                const url = new URL(window.location.href);
+                url.searchParams.set('vaga', job.id);
+                window.history.pushState({ jobId: job.id }, '', `${url.pathname}?${url.searchParams.toString()}`);
+              }
+            }}
             onNavigate={navigateTo}
             onOpenAuth={(role, mode) => {
               setAuthModalRole(role);
@@ -724,7 +901,18 @@ export default function App() {
             ? (currentUser?.savedJobIds ?? []).includes(selectedJobForDetails.id)
             : false
         }
-        onClose={() => setSelectedJobForDetails(null)}
+        onClose={() => {
+          setSelectedJobForDetails(null);
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            if (url.searchParams.has('vaga') || url.pathname.startsWith('/vaga/')) {
+              url.searchParams.delete('vaga');
+              const cleanSearch = url.searchParams.toString();
+              const basePath = url.pathname.startsWith('/vaga/') ? '/' : url.pathname;
+              window.history.replaceState({}, '', cleanSearch ? `${basePath}?${cleanSearch}` : basePath);
+            }
+          }
+        }}
         onApply={handleApply}
         onToggleSaveJob={handleToggleSaveJob}
         onManageOwnJob={() => {
@@ -817,37 +1005,245 @@ export default function App() {
         onClose={() => setToast((prev) => ({ ...prev, show: false }))}
       />
 
-      {/* Cohesive Blue-Tinted Single-Row Footer */}
-      <footer className="bg-[#EEF4FF] border-t border-[#DBEAFE] mt-auto">
-        <div className="container-app py-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-[13px] text-[#475569]">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-[#1E40AF]">PrudenEmpregos</span>
-            <span className="text-[#93C5FD]">·</span>
-            <span>© {new Date().getFullYear()} Presidente Prudente, SP</span>
+      {/* Modal Institucional: Sobre Nós / Termos de Uso */}
+      {institutionalModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div
+            className="absolute inset-0 bg-[#0F172A]/40 backdrop-blur-[1px]"
+            onClick={() => setInstitutionalModal(null)}
+            aria-hidden="true"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="institutional-modal-title"
+            className="modal-surface w-full sm:max-w-xl max-h-[88vh] rounded-t-2xl sm:rounded-2xl p-6 relative z-10 overflow-y-auto bg-white space-y-4"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-[#EAECEF]">
+              <h2 id="institutional-modal-title" className="text-[18px] font-bold text-[#0F172A]">
+                {institutionalModal === 'about'
+                  ? 'Sobre o PrudenEmpregos'
+                  : 'Termos de Uso e Regras da Plataforma'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setInstitutionalModal(null)}
+                className="px-2.5 py-1 rounded-lg text-[13px] font-semibold text-[#64748B] hover:text-[#0F172A] cursor-pointer"
+              >
+                Fechar ✕
+              </button>
+            </div>
+
+            {institutionalModal === 'about' ? (
+              <div className="space-y-3 text-[14px] text-[#334155] leading-relaxed">
+                <p>
+                  O <strong>PrudenEmpregos</strong> nasceu com a missão de conectar talentos e empresas de <strong>Presidente Prudente e toda a região do Oeste Paulista</strong> com agilidade, transparência e segurança.
+                </p>
+                <p>
+                  Diferente de plataformas genéricas nacionais, nosso portal foi projetado especificamente para a realidade do comércio, indústria, serviços, agronegócio e setor de tecnologia de Presidente Prudente, permitindo candidaturas diretas com 1 clique e geração de currículos no padrão ATS.
+                </p>
+                <p>
+                  Todas as empresas anunciantes passam por validação cadastral de CNPJ junto à Receita Federal, e os candidatos contam com proteção integral de dados sensíveis conforme a LGPD (Lei nº 13.709/2018).
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3 text-[14px] text-[#334155] leading-relaxed">
+                <p>
+                  <strong>1. Perfis de Acesso (CPF e CNPJ):</strong> Contas de candidatos são vinculadas exclusivamente a CPF válido e destinam-se à busca de vagas e envio de currículos. Contas corporativas exigem CNPJ ativo validado na Receita Federal para publicação de vagas.
+                </p>
+                <p>
+                  <strong>2. Sistema de Créditos Transparente:</strong> Todo novo cadastro recebe gratuitamente <strong>+30 créditos de boas-vindas</strong>. Os créditos não possuem prazo de validade e são utilizados sob demanda: Candidatar-se a vaga (10 cr), Gerar Currículo ATS em PDF (15 cr), Publicar vaga por 30 dias (10 cr) e Destacar vaga no topo (15 cr).
+                </p>
+                <p>
+                  <strong>3. Veracidade das Vagas:</strong> É estritamente proibida a publicação de vagas fictícias, cobrança de taxas de candidatos por processos seletivos ou solicitação de documentos bancários antes da contratação formal.
+                </p>
+                <p>
+                  <strong>4. Pagamentos e Reembolsos:</strong> As recargas opcionais de pacotes de créditos são processadas via Checkout Oficial do Mercado Pago (Pix ou Cartão) com liberação imediata na carteira digital da conta.
+                </p>
+              </div>
+            )}
+
+            <div className="pt-3 border-t border-[#EAECEF] flex justify-end">
+              <button
+                type="button"
+                onClick={() => setInstitutionalModal(null)}
+                className="btn-base btn-md btn-primary"
+              >
+                Entendi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rodapé Institucional Completo em 4 Colunas */}
+      <footer className="bg-[#EEF4FF] border-t border-[#DBEAFE] mt-auto text-[#475569]">
+        <div className="container-app py-10 md:py-12">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+            {/* Coluna 1: Marca e Propósito Regional */}
+            <div className="space-y-2.5">
+              <button
+                type="button"
+                onClick={() => navigateTo('home')}
+                className="text-[18px] font-extrabold tracking-tight text-[#1E40AF] hover:text-[#1D4ED8] transition-colors cursor-pointer"
+              >
+                PrudenEmpregos
+              </button>
+              <p className="text-[13px] text-[#475569] leading-relaxed">
+                Conectando talentos e empresas de Presidente Prudente e região com agilidade e transparência.
+              </p>
+              <p className="text-[12px] text-[#64748B] pt-1">
+                Presidente Prudente · Oeste Paulista, SP
+              </p>
+            </div>
+
+            {/* Coluna 2: Navegação */}
+            <div className="space-y-2.5">
+              <h3 className="text-[13px] font-bold uppercase tracking-wider text-[#1E40AF]">
+                Navegação
+              </h3>
+              <ul className="space-y-2 text-[13px]">
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => navigateTo('home')}
+                    className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
+                  >
+                    Vagas em Presidente Prudente
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (currentUser && isCompany(currentUser)) {
+                        navigateTo('company', 'jobs');
+                      } else {
+                        setAuthModalRole('company');
+                        setAuthModalMode('register');
+                        setIsAuthModalOpen(true);
+                      }
+                    }}
+                    className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
+                  >
+                    Para Empresas (Anunciar Vaga)
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => navigateTo('plans')}
+                    className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
+                  >
+                    Créditos e Planos
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthModalRole('candidate');
+                      setAuthModalMode('register');
+                      setIsAuthModalOpen(true);
+                    }}
+                    className="font-semibold text-[#1E40AF] hover:text-[#1D4ED8] transition-colors cursor-pointer"
+                  >
+                    Criar Conta (+30 cr grátis)
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            {/* Coluna 3: Institucional e Legal */}
+            <div className="space-y-2.5">
+              <h3 className="text-[13px] font-bold uppercase tracking-wider text-[#1E40AF]">
+                Institucional e Legal
+              </h3>
+              <ul className="space-y-2 text-[13px]">
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setInstitutionalModal('about')}
+                    className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
+                  >
+                    Sobre Nós
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setInstitutionalModal('terms')}
+                    className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
+                  >
+                    Termos de Uso
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setIsLgpdModalOpen(true)}
+                    className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
+                  >
+                    Privacidade e LGPD
+                  </button>
+                </li>
+              </ul>
+            </div>
+
+            {/* Coluna 4: Suporte e Contato */}
+            <div className="space-y-2.5">
+              <h3 className="text-[13px] font-bold uppercase tracking-wider text-[#1E40AF]">
+                Suporte e Contato
+              </h3>
+              <div className="space-y-2 text-[13px]">
+                <a
+                  href="mailto:contato@prudenempregos.com.br"
+                  className="block hover:text-[#1D4ED8] transition-colors break-all"
+                >
+                  contato@prudenempregos.com.br
+                </a>
+                <div>
+                  <a
+                    href="https://api.whatsapp.com/send?phone=5518999990000&text=Ol%C3%A1!%20Preciso%20de%20suporte%20no%20portal%20PrudenEmpregos."
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#059669] hover:bg-[#047857] text-white text-[12px] font-semibold transition-colors"
+                  >
+                    <span>Suporte via WhatsApp</span>
+                  </a>
+                </div>
+                <div className="flex items-center gap-3 pt-1 text-[12px] font-semibold text-[#1E40AF]">
+                  <a
+                    href="https://instagram.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Instagram do PrudenEmpregos"
+                    className="hover:underline"
+                  >
+                    Instagram
+                  </a>
+                  <span className="text-[#93C5FD]">·</span>
+                  <a
+                    href="https://linkedin.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="LinkedIn do PrudenEmpregos"
+                    className="hover:underline"
+                  >
+                    LinkedIn
+                  </a>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-5">
-            <button
-              type="button"
-              onClick={() => navigateTo('home')}
-              className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
-            >
-              Vagas
-            </button>
-            <button
-              type="button"
-              onClick={() => navigateTo('plans')}
-              className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
-            >
-              Créditos
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsLgpdModalOpen(true)}
-              className="hover:text-[#1D4ED8] transition-colors cursor-pointer"
-            >
-              Privacidade
-            </button>
+          <div className="mt-8 pt-5 border-t border-[#DBEAFE] flex flex-col sm:flex-row items-center justify-between gap-2 text-[12px] text-[#64748B]">
+            <span>
+              © {new Date().getFullYear()} PrudenEmpregos · Todos os direitos reservados.
+            </span>
+            <span>
+              Portal Regional de Empregos · Presidente Prudente e Oeste Paulista, SP
+            </span>
           </div>
         </div>
       </footer>

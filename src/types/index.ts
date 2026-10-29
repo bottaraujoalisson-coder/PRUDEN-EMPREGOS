@@ -112,9 +112,17 @@ export interface UserProfile {
   cpf?: string;
   cnpj?: string;
   savedJobIds?: string[];
+  cnhCategory?: CnhCategory;
+  ownVehicle?: VehicleRequirement;
+  jobAlertAreas?: string[];
+  jobAlertWorkModels?: string[];
+  jobAlertsEnabled?: boolean;
 
   credits?: number;
   isVerified?: boolean;
+  isVerifiedCompany?: boolean;
+  welcomeCreditsGranted?: boolean;
+  videoPitchUrl?: string;
 
   // --- PLANOS & ASSINATURA MERCADO PAGO ---
   planId?: PlanId;
@@ -140,6 +148,7 @@ export interface CreditOrder {
   credits: number;
   amount: number;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'refunded';
+  credited?: boolean;
   paymentMethod: 'pix' | 'credit_card';
   mpPreferenceId?: string;
   mpPaymentId?: string;
@@ -180,7 +189,7 @@ export interface Job {
   location: string;
   category: string;
   workModel: 'Presencial' | 'Remoto' | 'Híbrido';
-  contract: 'CLT' | 'PJ' | 'Estágio' | 'Temporário' | 'Jovem Aprendiz';
+  contract: 'CLT' | 'PJ' | 'Estágio' | 'Temporário' | 'Jovem Aprendiz' | 'Freelancer';
   experience: 'Qualquer Nível' | 'Primeiro Emprego' | 'Estágio' | 'Júnior' | 'Pleno' | 'Sênior';
   description: string;
   skills: string[];

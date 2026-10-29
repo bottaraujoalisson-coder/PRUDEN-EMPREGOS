@@ -100,7 +100,8 @@ export async function lookupCompanyByCnpj(rawCnpj: string): Promise<CnpjLookupRe
         ...(data.active
           ? {}
           : {
-              error: `Cadastro bloqueado: CNPJ com situação "${data.situacaoCadastral}" na Receita Federal.`,
+              error:
+                'Este CNPJ encontra-se em situação cadastral inapta ou baixada na Receita Federal e não pode publicar vagas.',
               errorCode: 'CNPJ_INACTIVE',
             }),
       };
@@ -148,7 +149,8 @@ export async function lookupCompanyByCnpj(rawCnpj: string): Promise<CnpjLookupRe
         ...(isActive
           ? {}
           : {
-              error: `Cadastro bloqueado: CNPJ com situação "${situacaoStr}" na Receita Federal.`,
+              error:
+                'Este CNPJ encontra-se em situação cadastral inapta ou baixada na Receita Federal e não pode publicar vagas.',
               errorCode: 'CNPJ_INACTIVE',
             }),
       };

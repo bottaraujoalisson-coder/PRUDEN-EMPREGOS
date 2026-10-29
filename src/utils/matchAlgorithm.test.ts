@@ -80,7 +80,16 @@ test('Módulo 4: isJobNew detects jobs < 48h and expiration helpers compute rene
   assert.equal(daysAfterRenewal, 40);
 });
 
-test('Módulo 5: formatJobSalary handles range, exact, negotiable, and legacy salaryRange', () => {
+test('Módulo 5: formatJobSalary and formatSalaryBRL handle range, exact, negotiable, raw numeric strings, and legacy salaryRange', async () => {
+  const { formatSalaryBRL } = await import('./matchAlgorithm');
+
+  assert.equal(formatSalaryBRL(2500), 'R$ 2.500,00');
+  assert.equal(formatSalaryBRL('2500'), 'R$ 2.500,00');
+  assert.equal(formatSalaryBRL('4200'), 'R$ 4.200,00');
+  assert.equal(formatSalaryBRL('2200 + comissão'), 'R$ 2.200,00 + comissão');
+  assert.equal(formatSalaryBRL(''), 'Salário a combinar');
+  assert.equal(formatSalaryBRL(null), 'Salário a combinar');
+
   assert.equal(
     formatJobSalary({ salaryType: 'range', salaryMin: 2000, salaryMax: 2500 }),
     'R$ 2.000 - R$ 2.500'
@@ -88,6 +97,10 @@ test('Módulo 5: formatJobSalary handles range, exact, negotiable, and legacy sa
   assert.equal(
     formatJobSalary({ salaryType: 'exact', salaryMin: 2200 }),
     'R$ 2.200,00'
+  );
+  assert.equal(
+    formatJobSalary({ salaryRange: '2500' }),
+    'R$ 2.500,00'
   );
   assert.equal(
     formatJobSalary({ salaryType: 'negotiable' }),

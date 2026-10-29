@@ -150,6 +150,7 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
 
   const handleInitiateApply = () => {
     if (!currentUser) {
+      onClose();
       onApply(job);
       return;
     }

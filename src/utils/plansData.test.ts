@@ -62,26 +62,30 @@ test('Catálogo Autoritativo de Pacotes de Créditos: validação de preços, b�
   const starter = getCreditPackageById('pack_starter');
   assert.ok(starter);
   assert.equal(starter.totalCredits, 10);
-  assert.equal(starter.price, 29.9);
+  assert.equal(starter.price, 14.9);
   assert.equal(starter.ctaLabel, 'Liberar +10 Créditos Agora');
   assert.equal(starter.features.length, 3);
   assert.equal(starter.badge, undefined);
 
+  const resume15 = getCreditPackageById('pack_resume_15');
+  assert.ok(resume15);
+  assert.equal(resume15.totalCredits, 15);
+  assert.equal(resume15.price, 19.9);
+
   const pro = getCreditPackageById('pack_pro');
   assert.ok(pro);
   assert.equal(pro.totalCredits, 35);
-  assert.equal(pro.price, 69.9);
+  assert.equal(pro.price, 44.9);
   assert.ok(pro.isFeatured);
   assert.equal(pro.badge, 'MAIS ESCOLHIDO EM PRESIDENTE PRUDENTE • +5 BÔNUS');
   assert.equal(pro.badgeVariant, 'featured');
   assert.equal(pro.ctaLabel, 'Garantir +35 Créditos (Com Bônus)');
   assert.equal(pro.features.length, 4);
-  assert.ok(pro.features.some((f) => f.includes('R$ 34,75')));
 
   const business = getCreditPackageById('pack_business');
   assert.ok(business);
   assert.equal(business.totalCredits, 100);
-  assert.equal(business.price, 149.9);
+  assert.equal(business.price, 109.9);
   assert.equal(business.isFeatured, false);
   assert.equal(business.badge, 'MENOR CUSTO POR CRÉDITO • +20 BÔNUS');
   assert.equal(business.badgeVariant, 'neutral');

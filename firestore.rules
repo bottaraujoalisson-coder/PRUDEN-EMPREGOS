@@ -75,7 +75,7 @@ service cloud.firestore {
       allow delete: if isValidId(sessionId);
     }
 
-    // USERS COLLECTION (Strict RBAC & PII Protection)
+    // USERS COLLECTION (Strict RBAC & System Field Protection)
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin() || resource.data.type == 'company';
       allow list: if isAdmin();
@@ -93,12 +93,63 @@ service cloud.firestore {
         && (!('uid' in incoming()) || incoming().uid == userId)
         && (
           isAdmin() ||
-          !('type' in incoming()) ||
-          incoming().type == existing().type ||
-          incoming().type in ['candidate', 'company']
+          (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+              'jobPostingCredits',
+              'plan',
+              'planExpiresAt',
+              'isVerifiedCompany'
+            ]) &&
+            (!('type' in incoming()) || incoming().type == existing().type || incoming().type in ['candidate', 'company']) &&
+            (
+              !('welcomeCreditsGranted' in incoming()) ||
+              incoming().welcomeCreditsGranted == existing().get('welcomeCreditsGranted', false) ||
+              (existing().get('welcomeCreditsGranted', false) == false && incoming().welcomeCreditsGranted == true)
+            )
+          )
         );
 
       allow delete: if isAdmin();
+    }
+
+    // PROFILES COLLECTION (Public Profile Data - RF-012 / RF-022)
+    match /profiles/{userId} {
+      allow get: if isSignedIn() || resource.data.type == 'company' || isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow update: if (isOwner(userId) || isAdmin())
+        && (
+          isAdmin() ||
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'credits',
+            'jobPostingCredits',
+            'role',
+            'plan',
+            'planExpiresAt',
+            'welcomeCreditsGranted',
+            'isVerifiedCompany'
+          ])
+        );
+      allow delete: if isAdmin();
+    }
+
+    // PRIVATE PROFILES COLLECTION (LGPD Fiscal & Personal Data: CPF, CNPJ, Fiscal Address, Private Phone)
+    match /private_profiles/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow delete: if isAdmin() || isOwner(userId);
+    }
+
+    // DOCUMENTS COLLECTION (Normalized CPF/CNPJ Registry & Welcome Bonus Anti-Duplication)
+    match /documents/{docId} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow create: if isValidId(docId)
+        && ((isSignedIn() && incoming().uid == request.auth.uid) || isDirectCloudUid(incoming().uid));
+      allow update: if isValidId(docId)
+        && ((isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.uid))
+        && incoming().uid == resource.data.uid;
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid) || isDirectCloudUid(resource.data.uid);
     }
 
     // DOCUMENT REGISTRY COLLECTION (CPF / CNPJ UNIQUENESS)
@@ -140,17 +191,12 @@ service cloud.firestore {
         || isDirectCloudUid(resource.data.companyId);
     }
 
-    // APPLICATIONS COLLECTION
+    // APPLICATIONS COLLECTION (Strict Candidate & Employer Read Isolation)
     match /applications/{applicationId} {
-      allow get: if (isSignedIn() && (
+      allow get, list: if (isSignedIn() && (
         resource.data.candidateId == request.auth.uid ||
         resource.data.companyId == request.auth.uid ||
-        isAdmin()
-      )) || isDirectCloudUid(resource.data.candidateId) || isDirectCloudUid(resource.data.companyId);
-
-      allow list: if (isSignedIn() && (
-        resource.data.candidateId == request.auth.uid ||
-        resource.data.companyId == request.auth.uid ||
+        resource.data.get('employerId', '') == request.auth.uid ||
         isAdmin()
       )) || isDirectCloudUid(resource.data.candidateId) || isDirectCloudUid(resource.data.companyId);
 
@@ -160,6 +206,7 @@ service cloud.firestore {
 
       allow update: if (isSignedIn() && (
         resource.data.companyId == request.auth.uid ||
+        resource.data.get('employerId', '') == request.auth.uid ||
         isAdmin()
       )) || isDirectCloudUid(resource.data.companyId);
 

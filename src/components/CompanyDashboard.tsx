@@ -301,7 +301,7 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
     'Qualquer Nível' | 'Primeiro Emprego' | 'Estágio' | 'Júnior' | 'Pleno' | 'Sênior'
   >('Pleno');
   const [jobContract, setJobContract] = useState<
-    'CLT' | 'PJ' | 'Estágio' | 'Temporário' | 'Jovem Aprendiz'
+    'CLT' | 'PJ' | 'Estágio' | 'Temporário' | 'Jovem Aprendiz' | 'Freelancer'
   >('CLT');
   const [jobLocation, setJobLocation] = useState('Presidente Prudente, SP');
   const [jobSkillsStr, setJobSkillsStr] = useState('');
@@ -325,8 +325,66 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
   const [submittingJob, setSubmittingJob] = useState(false);
   const [optimizingWithAi, setOptimizingWithAi] = useState(false);
 
+  const JOB_DRAFT_STORAGE_KEY = `pruden_job_wizard_draft_v1_${user.uid}`;
+
+  // Restaura rascunho automático da vaga ao abrir o painel (quando não está editando vaga existente)
+  useEffect(() => {
+    if (editingJob) return;
+    try {
+      const savedDraft = localStorage.getItem(JOB_DRAFT_STORAGE_KEY);
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft);
+        if (parsed.jobTitle) setJobTitle(parsed.jobTitle);
+        if (parsed.jobCategory) setJobCategory(parsed.jobCategory);
+        if (parsed.jobWorkModel) setJobWorkModel(parsed.jobWorkModel);
+        if (parsed.jobExperience) setJobExperience(parsed.jobExperience);
+        if (parsed.jobContract) setJobContract(parsed.jobContract);
+        if (parsed.jobLocation) setJobLocation(parsed.jobLocation);
+        if (parsed.jobSkillsStr) setJobSkillsStr(parsed.jobSkillsStr);
+        if (parsed.jobDescription) setJobDescription(parsed.jobDescription);
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [JOB_DRAFT_STORAGE_KEY]);
+
+  // Salva rascunho automaticamente em localStorage enquanto a empresa preenche os 4 passos
+  useEffect(() => {
+    if (editingJob) return;
+    if (!jobTitle.trim() && !jobDescription.trim() && !jobSkillsStr.trim()) return;
+    try {
+      localStorage.setItem(
+        JOB_DRAFT_STORAGE_KEY,
+        JSON.stringify({
+          jobTitle,
+          jobCategory,
+          jobWorkModel,
+          jobExperience,
+          jobContract,
+          jobLocation,
+          jobSkillsStr,
+          jobDescription,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [
+    editingJob,
+    JOB_DRAFT_STORAGE_KEY,
+    jobTitle,
+    jobCategory,
+    jobWorkModel,
+    jobExperience,
+    jobContract,
+    jobLocation,
+    jobSkillsStr,
+    jobDescription,
+  ]);
+
   // Candidate Pipeline states
-  const [sortByScreening, setSortByScreening] = useState(true);
+  const [sortByScreening, setSortByScreening] = useState(false);
   const [expandedCandidateIds, setExpandedCandidateIds] = useState<Record<string, boolean>>({});
   const [selectedCandidateForNotes, setSelectedCandidateForNotes] = useState<Application | null>(
     null
@@ -425,6 +483,11 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
     setJobDescription('');
     setJobPremium(false);
     setRoughNotes('');
+    try {
+      localStorage.removeItem(JOB_DRAFT_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
   };
 
   const handleStartEditJob = (job: Job) => {

@@ -7,7 +7,7 @@ interface NavbarProps {
   currentUser: UserProfile | null;
   isAdmin: boolean;
   currentView: string;
-  candidateSubTab?: 'applications' | 'resume' | 'saved';
+  candidateSubTab?: 'applications' | 'resume' | 'saved' | 'alerts';
   companySubTab?: 'jobs' | 'candidates' | 'post' | 'credits';
   onNavigate: (view: string, subTab?: string) => void;
   onOpenAuth: (type: 'candidate' | 'company', mode?: 'login' | 'register') => void;

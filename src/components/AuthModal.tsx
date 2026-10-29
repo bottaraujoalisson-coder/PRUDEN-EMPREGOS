@@ -30,10 +30,23 @@ import {
   normalizeCEP,
   normalizeCPF,
   normalizeCNPJ,
+  validatePasswordStrength,
   validateRegistrationInput,
 } from '../utils/validation';
 import { INITIAL_WELCOME_CREDITS } from '../utils/creditsData';
-import { X, Loader2, CheckCircle2, AlertCircle, MapPin, Building2, ShieldCheck, Gift } from 'lucide-react';
+import {
+  X,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  MapPin,
+  Building2,
+  ShieldCheck,
+  Gift,
+  Mail,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -52,10 +65,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onSuccess,
   showToast,
 }) => {
-  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot' | 'google_onboarding'>(
+    initialMode
+  );
   const [role, setRole] = useState<'candidate' | 'company'>(
     initialType === 'company' ? 'company' : 'candidate'
   );
+  const [registerStyle, setRegisterStyle] = useState<'email_only' | 'full'>('email_only');
+  const [showPassword, setShowPassword] = useState(false);
+  const [pendingGoogleUser, setPendingGoogleUser] = useState<{
+    uid: string;
+    email: string;
+    displayName: string;
+    phoneNumber: string;
+  } | null>(null);
 
   const [name, setName] = useState('');
   const [razaoSocial, setRazaoSocial] = useState('');
@@ -92,6 +115,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (isOpen) {
       setRole(initialType === 'company' ? 'company' : 'candidate');
       setMode(initialMode);
+      setPendingGoogleUser(null);
       setDocumentError('');
       setDocumentAvailable(null);
       setCnpjData(null);
@@ -131,9 +155,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setCnpjData(null);
     setFieldErrors((prev) => ({ ...prev, document: '' }));
     setErrorMsg('');
-    const digits = rawVal.replace(/\D/g, '');
+    const digits = rawVal.replace(/\D/g, '').slice(0, 14);
 
-    if (role === 'candidate') {
+    // Detecção automática inteligente: até 11 dígitos = CPF (Candidato), 12 a 14 dígitos = CNPJ (Empresa)
+    const detectedRole: 'candidate' | 'company' =
+      digits.length > 11 ? 'company' : digits.length === 11 ? 'candidate' : role;
+    if (digits.length === 11 && role !== 'candidate') {
+      setRole('candidate');
+    } else if (digits.length > 11 && role !== 'company') {
+      setRole('company');
+    }
+
+    if (detectedRole === 'candidate' && digits.length <= 11) {
       const formatted = formatCPF(digits);
       setDocumentInput(formatted);
       if (digits.length === 11) {
@@ -142,7 +175,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           return;
         }
         setDocumentChecking(true);
-        const check = await checkDocumentAvailability('CPF', digits);
+        const check = await checkDocumentAvailability('CPF', digits, pendingGoogleUser?.uid);
         setDocumentChecking(false);
         if (!check.available) {
           setDocumentError(check.message || 'Este CPF já está cadastrado na plataforma.');
@@ -161,7 +194,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         }
         setDocumentChecking(true);
         const [check, rfLookup] = await Promise.all([
-          checkDocumentAvailability('CNPJ', digits),
+          checkDocumentAvailability('CNPJ', digits, pendingGoogleUser?.uid),
           lookupCompanyByCnpj(digits),
         ]);
         setDocumentChecking(false);
@@ -175,7 +208,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (!rfLookup.success || !rfLookup.data) {
           setDocumentError(
             rfLookup.error ||
-              'CNPJ inexistente ou com situação cadastral inativa na Receita Federal. Cadastro bloqueado.'
+              'Este CNPJ encontra-se em situação cadastral inapta ou baixada na Receita Federal e não pode publicar vagas.'
           );
           setDocumentAvailable(false);
           return;
@@ -262,19 +295,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       case 'auth/invalid-credential':
         return 'E-mail ou senha incorretos.';
       case 'auth/email-already-in-use':
-        return 'Este e-mail já está cadastrado na plataforma.';
+        return 'Este e-mail já está cadastrado na plataforma. Clique em "Já tenho conta" para entrar.';
       case 'auth/weak-password':
-        return 'A senha deve ter pelo menos 6 caracteres.';
+        return rawMessage && !rawMessage.startsWith('Firebase:')
+          ? rawMessage
+          : 'A senha deve ter pelo menos 6 caracteres.';
       case 'auth/invalid-email':
         return 'Informe um endereço de e-mail válido.';
       case 'auth/popup-closed-by-user':
         return 'A janela de login foi fechada antes de concluir.';
       case 'auth/popup-blocked':
-        return 'O navegador bloqueou a janela do Google. Permita pop-ups ou entre usando seu E-mail e Senha acima.';
+        return 'O navegador bloqueou a janela do Google. Permita pop-ups ou entre usando seu E-mail e Senha.';
       case 'auth/unauthorized-domain':
-        return 'Para entrar agora neste domínio, utilize seu E-mail e Senha acima ou confirme na janela segura do Google.';
+        return 'Confirme na janela segura do Google ou utilize seu E-mail e Senha abaixo.';
       case 'auth/operation-not-allowed':
-        return 'Use seu E-mail e Senha acima ou a opção "Continuar com o Google".';
+        return 'Use seu E-mail e Senha ou a opção "Continuar com o Google".';
       case 'auth/too-many-requests':
         return rawMessage || 'Muitas tentativas seguidas. Aguarde alguns minutos por segurança.';
       default:
@@ -315,6 +350,80 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     if (mode === 'register') {
+      const hasTypedDocument = documentInput.replace(/\D/g, '').length > 0;
+      const useQuickEmailOnly = registerStyle === 'email_only' && !hasTypedDocument;
+
+      // Modo 1: Cadastro Rápido apenas com E-mail e Senha (sem exigir CPF/CNPJ ou CEP)
+      if (useQuickEmailOnly) {
+        const cleanEmail = email.trim().toLowerCase();
+        const errors: Record<string, string> = {};
+
+        if (!validateEmail(cleanEmail)) {
+          errors.email = 'Informe um endereço de e-mail válido.';
+        }
+        const pwdValidation = validatePasswordStrength(password);
+        if (!pwdValidation.valid) {
+          errors.password = pwdValidation.message || 'A senha deve ter no mínimo 6 caracteres.';
+        }
+
+        if (Object.keys(errors).length > 0) {
+          setFieldErrors(errors);
+          setErrorMsg(errors.email || errors.password || 'Verifique os campos informados.');
+          return;
+        }
+
+        try {
+          setLoading(true);
+          const authRes = await smartRegisterWithEmailPassword(cleanEmail, password);
+          const uid = authRes.uid;
+          const isAdminUser = await checkIsAdmin(uid, cleanEmail);
+          const userType: UserRole = isAdminUser ? 'admin' : role;
+          const now = new Date().toISOString();
+
+          const emailNameFallback = cleanEmail
+            .split('@')[0]
+            .replace(/[._-]+/g, ' ')
+            .replace(/\b\w/g, (l) => l.toUpperCase());
+
+          const displayName =
+            name.trim() ||
+            (role === 'company' ? `Empresa ${emailNameFallback}` : emailNameFallback || 'Candidato');
+
+          const quickProfile: UserProfile = stripUndefined({
+            uid,
+            email: cleanEmail,
+            name: displayName,
+            type: userType,
+            phone: phone.trim() ? formatPhone(phone) : undefined,
+            city: city || 'Presidente Prudente, SP',
+            state: stateUf || 'SP',
+            skills: [],
+            isVerified: true,
+            credits: INITIAL_WELCOME_CREDITS,
+            ...(role === 'company'
+              ? { nomeFantasia: displayName }
+              : { profileCompleteness: 45, savedJobIds: [] }),
+            createdAt: now,
+            updatedAt: now,
+          });
+
+          await saveUserProfile(uid, quickProfile);
+          showToast(
+            role === 'company'
+              ? `Conta da empresa criada com sucesso! Você ganhou +${INITIAL_WELCOME_CREDITS} créditos grátis.`
+              : `Conta criada com sucesso! Você ganhou +${INITIAL_WELCOME_CREDITS} créditos grátis para usar no site.`
+          );
+          onSuccess(quickProfile);
+          onClose();
+        } catch (err: any) {
+          setErrorMsg(getTranslatedFirebaseError(err?.code || '', err?.message));
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+
+      // Modo 2: Cadastro Completo com validação de CPF / CNPJ (Receita Federal) e CEP
       const validation = validateRegistrationInput({
         role,
         name,
@@ -445,7 +554,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setLoading(false);
       }
     } else {
-      if (!validateEmail(email)) {
+      // Login somente com E-mail e Senha
+      const cleanEmail = email.trim().toLowerCase();
+      if (!validateEmail(cleanEmail)) {
         setErrorMsg('Informe um endereço de e-mail válido.');
         return;
       }
@@ -456,17 +567,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
       try {
         setLoading(true);
-        const authRes = await smartSignInWithEmailPassword(email.trim(), password);
+        const authRes = await smartSignInWithEmailPassword(cleanEmail, password);
         const uid = authRes.uid;
 
-        const profile = await getUserProfile(uid);
+        let profile = await getUserProfile(uid);
         if (!profile) {
-          setMode('register');
-          setErrorMsg(
-            'Complete seu cadastro informando seu documento (CPF ou CNPJ) e CEP para continuar.'
-          );
-          setLoading(false);
-          return;
+          const isAdminUser = await checkIsAdmin(uid, cleanEmail);
+          const now = new Date().toISOString();
+          const emailPrefix = cleanEmail
+            .split('@')[0]
+            .replace(/[._-]+/g, ' ')
+            .replace(/\b\w/g, (l) => l.toUpperCase());
+
+          const autoProfile: UserProfile = stripUndefined({
+            uid,
+            email: cleanEmail,
+            name: name.trim() || emailPrefix || 'Usuário',
+            type: isAdminUser ? 'admin' : role,
+            city: city || 'Presidente Prudente, SP',
+            state: stateUf || 'SP',
+            skills: [],
+            isVerified: true,
+            credits: INITIAL_WELCOME_CREDITS,
+            ...(role === 'company' ? {} : { profileCompleteness: 45, savedJobIds: [] }),
+            createdAt: now,
+            updatedAt: now,
+          });
+          await saveUserProfile(uid, autoProfile);
+          profile = autoProfile;
         }
 
         showToast(`Bem-vindo(a), ${profile.name.split(' ')[0]}!`);
@@ -485,99 +613,79 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setDocumentError('');
     setFieldErrors({});
 
-    const expectedDocType: 'CPF' | 'CNPJ' = role === 'company' ? 'CNPJ' : 'CPF';
-    const cleanDoc =
-      expectedDocType === 'CPF' ? normalizeCPF(documentInput) : normalizeCNPJ(documentInput);
-
-    if (mode === 'register') {
-      if (!cleanDoc) {
-        const msg = `Informe um ${expectedDocType} válido acima antes de criar sua conta com o Google.`;
-        setDocumentError(msg);
-        setErrorMsg(msg);
-        return;
-      }
-      if (expectedDocType === 'CPF' && !isValidCPF(cleanDoc)) {
-        const msg = 'CPF inválido. Verifique os 11 números e os dígitos verificadores.';
-        setDocumentError(msg);
-        setErrorMsg(msg);
-        return;
-      }
-      if (expectedDocType === 'CNPJ') {
-        if (!isValidCNPJ(cleanDoc)) {
-          const msg = 'CNPJ inválido. Verifique os 14 números e os dígitos verificadores.';
-          setDocumentError(msg);
-          setErrorMsg(msg);
-          return;
-        }
-        const rfLookup = await lookupCompanyByCnpj(cleanDoc);
-        if (!rfLookup.success) {
-          const msg =
-            rfLookup.error ||
-            'CNPJ inexistente ou inativo na Receita Federal. Cadastro bloqueado.';
-          setDocumentError(msg);
-          setErrorMsg(msg);
-          return;
-        }
-      }
-
-      const availability = await checkDocumentAvailability(expectedDocType, cleanDoc);
-      if (!availability.available) {
-        const msg =
-          availability.message || `Este ${expectedDocType} já está cadastrado na plataforma.`;
-        setDocumentError(msg);
-        setErrorMsg(msg);
-        return;
-      }
-    }
-
     try {
       setLoading(true);
+      // Importante: Chama smartSignInWithGoogle imediatamente sem awaits prévios para preservar o clique do navegador no pop-up
       const user = await smartSignInWithGoogle();
 
       let profile = await getUserProfile(user.uid);
       if (!profile) {
-        if (!cleanDoc || (expectedDocType === 'CPF' ? !isValidCPF(cleanDoc) : !isValidCNPJ(cleanDoc))) {
-          setMode('register');
-          setName(user.displayName || '');
-          setEmail(user.email || '');
-          const msg = `Para concluir seu primeiro acesso, informe seu ${expectedDocType} obrigatório e endereço por CEP.`;
-          setDocumentError(msg);
-          setErrorMsg(msg);
+        const expectedDocType: 'CPF' | 'CNPJ' = role === 'company' ? 'CNPJ' : 'CPF';
+        const cleanDoc =
+          expectedDocType === 'CPF' ? normalizeCPF(documentInput) : normalizeCNPJ(documentInput);
+        const hasValidOptionalDoc =
+          cleanDoc &&
+          (expectedDocType === 'CPF' ? isValidCPF(cleanDoc) : isValidCNPJ(cleanDoc));
+
+        if (!hasValidOptionalDoc) {
+          setPendingGoogleUser({
+            uid: user.uid,
+            email: user.email || '',
+            displayName:
+              name.trim() ||
+              user.displayName ||
+              (user.email ? user.email.split('@')[0] : 'Usuário Google'),
+            phoneNumber: user.phoneNumber || '',
+          });
+          setMode('google_onboarding');
           setLoading(false);
           return;
         }
 
-        const availability = await checkDocumentAvailability(expectedDocType, cleanDoc, user.uid);
-        if (!availability.available) {
-          const msg =
-            availability.message || `Este ${expectedDocType} já está vinculado a outra conta.`;
-          setDocumentError(msg);
-          setErrorMsg(msg);
-          setLoading(false);
-          return;
+        let attachDoc = false;
+        const availability = await checkDocumentAvailability(
+          expectedDocType,
+          cleanDoc,
+          user.uid
+        );
+        if (availability.available) {
+          attachDoc = true;
         }
 
         const isAdminUser = await checkIsAdmin(user.uid, user.email);
-        const formattedDoc =
-          expectedDocType === 'CPF' ? formatCPF(cleanDoc) : formatCNPJ(cleanDoc);
+        const formattedDoc = attachDoc
+          ? expectedDocType === 'CPF'
+            ? formatCPF(cleanDoc)
+            : formatCNPJ(cleanDoc)
+          : undefined;
         const now = new Date().toISOString();
+        const fallbackName =
+          name.trim() ||
+          user.displayName ||
+          (user.email ? user.email.split('@')[0] : 'Usuário Google');
 
         const newProfile: UserProfile = {
           uid: user.uid,
           email: user.email || '',
-          name: name.trim() || user.displayName || 'Usuário',
+          name: fallbackName,
           type: isAdminUser ? 'admin' : role,
-          documentType: expectedDocType,
-          documentNumber: formattedDoc,
-          normalizedDocument: cleanDoc,
-          ...(expectedDocType === 'CPF'
-            ? { cpf: formattedDoc }
-            : {
-                cnpj: formattedDoc,
-                razaoSocial: razaoSocial || name.trim(),
-                nomeFantasia: nomeFantasia || name.trim(),
-                cnpjSituacao: 'ATIVA',
-              }),
+          ...(attachDoc && formattedDoc
+            ? {
+                documentType: expectedDocType,
+                documentNumber: formattedDoc,
+                normalizedDocument: cleanDoc,
+                welcomeCreditsGranted: true,
+                ...(expectedDocType === 'CPF'
+                  ? { cpf: formattedDoc }
+                  : {
+                      cnpj: formattedDoc,
+                      razaoSocial: razaoSocial || fallbackName,
+                      nomeFantasia: nomeFantasia || fallbackName,
+                      cnpjSituacao: 'ATIVA',
+                      isVerifiedCompany: true,
+                    }),
+              }
+            : {}),
           phone: phone.trim() ? formatPhone(phone) : user.phoneNumber || '',
           cep: cep ? formatCEP(cep) : '',
           street: street.trim(),
@@ -594,17 +702,116 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         };
         profile = stripUndefined(newProfile);
         await saveUserProfile(user.uid, profile);
+
+        showToast(
+          `Conta conectada com o Google! Você ganhou +${INITIAL_WELCOME_CREDITS} créditos grátis de boas-vindas.`
+        );
+      } else {
+        showToast(`Bem-vindo(a) de volta, ${profile.name.split(' ')[0]}!`);
       }
 
-      showToast(
-        mode === 'register'
-          ? `Cadastro concluído! Você ganhou +${INITIAL_WELCOME_CREDITS} créditos grátis de boas-vindas.`
-          : 'Acesso realizado com sucesso.'
-      );
       onSuccess(profile);
       onClose();
     } catch (err: any) {
       setErrorMsg(getTranslatedFirebaseError(err?.code || '', err?.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompleteGoogleOnboarding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingGoogleUser) return;
+    setErrorMsg('');
+    setDocumentError('');
+
+    const rawDigits = documentInput.replace(/\D/g, '');
+    const docType: 'CPF' | 'CNPJ' = rawDigits.length > 11 ? 'CNPJ' : 'CPF';
+    const targetRole: 'candidate' | 'company' = docType === 'CNPJ' ? 'company' : 'candidate';
+
+    if (docType === 'CPF' && !isValidCPF(rawDigits)) {
+      setDocumentError('Informe um CPF válido de 11 dígitos para ativar sua carteira.');
+      return;
+    }
+    if (docType === 'CNPJ' && !isValidCNPJ(rawDigits)) {
+      setDocumentError('Informe um CNPJ válido de 14 dígitos para ativar sua conta empresarial.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let verifiedCnpj = cnpjData;
+      if (docType === 'CNPJ') {
+        const rfResult = await lookupCompanyByCnpj(rawDigits);
+        if (!rfResult.success || !rfResult.data) {
+          setDocumentError(
+            rfResult.error ||
+              'Este CNPJ encontra-se em situação cadastral inapta ou baixada na Receita Federal e não pode publicar vagas.'
+          );
+          setLoading(false);
+          return;
+        }
+        verifiedCnpj = rfResult.data;
+      }
+
+      const availability = await checkDocumentAvailability(
+        docType,
+        rawDigits,
+        pendingGoogleUser.uid
+      );
+      if (!availability.available) {
+        setDocumentError(
+          availability.message || `Este ${docType} já está vinculado a outra conta.`
+        );
+        setLoading(false);
+        return;
+      }
+
+      const isAdminUser = await checkIsAdmin(pendingGoogleUser.uid, pendingGoogleUser.email);
+      const formattedDoc = docType === 'CPF' ? formatCPF(rawDigits) : formatCNPJ(rawDigits);
+      const now = new Date().toISOString();
+      const displayName =
+        name.trim() ||
+        verifiedCnpj?.nomeFantasia ||
+        verifiedCnpj?.razaoSocial ||
+        pendingGoogleUser.displayName;
+
+      const newProfile: UserProfile = stripUndefined({
+        uid: pendingGoogleUser.uid,
+        email: pendingGoogleUser.email,
+        name: displayName,
+        type: isAdminUser ? 'admin' : targetRole,
+        documentType: docType,
+        documentNumber: formattedDoc,
+        normalizedDocument: rawDigits,
+        welcomeCreditsGranted: true,
+        ...(docType === 'CPF'
+          ? { cpf: formattedDoc, profileCompleteness: 55, savedJobIds: [] }
+          : {
+              cnpj: formattedDoc,
+              razaoSocial: verifiedCnpj?.razaoSocial || displayName,
+              nomeFantasia: verifiedCnpj?.nomeFantasia || displayName,
+              cnpjSituacao: 'ATIVA',
+              isVerifiedCompany: true,
+            }),
+        phone: phone.trim() ? formatPhone(phone) : '',
+        city: verifiedCnpj?.cityState || city || 'Presidente Prudente, SP',
+        state: stateUf || 'SP',
+        skills: [],
+        isVerified: true,
+        credits: INITIAL_WELCOME_CREDITS,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await saveUserProfile(pendingGoogleUser.uid, newProfile);
+      showToast(
+        `Carteira ativada com sucesso! +${INITIAL_WELCOME_CREDITS} créditos grátis liberados.`
+      );
+      onSuccess(newProfile);
+      onClose();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Erro ao concluir ativação da conta.');
     } finally {
       setLoading(false);
     }
@@ -631,7 +838,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         <div className="p-5 sm:p-7">
           <div className="flex justify-between items-center mb-4">
             <h2 id="auth-modal-title" className="text-[19px] sm:text-[20px] font-bold text-[#172033]">
-              {mode === 'forgot'
+              {mode === 'google_onboarding'
+                ? 'Ativar Carteira e Liberar 30 Créditos'
+                : mode === 'forgot'
                 ? 'Recuperar senha'
                 : mode === 'register'
                 ? 'Criar conta no PrudenEmpregos'
@@ -648,6 +857,80 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </button>
           </div>
 
+          {mode === 'google_onboarding' && pendingGoogleUser ? (
+            <form onSubmit={handleCompleteGoogleOnboarding} className="space-y-4">
+              <div className="p-3.5 rounded-xl bg-[#EFF6FF] border border-[#BFDBFE] flex items-start gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#1D4ED8] text-white flex items-center justify-center shrink-0 mt-0.5">
+                  <Gift className="w-4 h-4" />
+                </div>
+                <div className="text-[12px] sm:text-[13px] leading-snug">
+                  <p className="font-bold text-[#1E40AF]">
+                    Confirme seu CPF ou CNPJ para ativar sua carteira e liberar seus 30 créditos grátis
+                  </p>
+                  <p className="text-[#334155] mt-0.5">
+                    Olá, <strong>{pendingGoogleUser.displayName}</strong>! Digite seu CPF (11 dígitos para Candidato) ou CNPJ (14 dígitos para Empresa).
+                  </p>
+                </div>
+              </div>
+
+              {errorMsg && (
+                <div role="alert" className="text-[#D92D20] bg-[#FEF2F2] border border-[#D92D20]/20 rounded-lg p-3 text-sm font-medium">
+                  {errorMsg}
+                </div>
+              )}
+
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label htmlFor="google-onboarding-doc" className="form-label mb-0">
+                    CPF (Candidato) ou CNPJ (Empresa) *
+                  </label>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      role === 'company'
+                        ? 'bg-indigo-100 text-indigo-800'
+                        : 'bg-blue-100 text-blue-800'
+                    }`}
+                  >
+                    {role === 'company'
+                      ? 'Perfil Empresa identificado'
+                      : 'Perfil Candidato identificado'}
+                  </span>
+                </div>
+                <input
+                  id="google-onboarding-doc"
+                  type="text"
+                  inputMode="numeric"
+                  required
+                  value={documentInput}
+                  onChange={(e) => handleDocumentChange(e.target.value)}
+                  placeholder="000.000.000-00 ou 00.000.000/0001-00"
+                  className="form-control tabular-nums"
+                />
+                {documentError && (
+                  <p className="text-xs font-medium text-[#D92D20] mt-1">{documentError}</p>
+                )}
+              </div>
+
+              {role === 'company' && cnpjData && (
+                <div className="p-3 rounded-xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-950 space-y-1">
+                  <p className="font-bold text-emerald-800">
+                    Receita Federal: {cnpjData.razaoSocial} ({cnpjData.situacaoCadastral})
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || documentChecking}
+                className="w-full btn-base btn-md btn-primary"
+              >
+                {loading
+                  ? 'Validando e ativando carteira...'
+                  : `Ativar Carteira e Liberar +${INITIAL_WELCOME_CREDITS} Créditos`}
+              </button>
+            </form>
+          ) : (
+            <>
           {/* Mode Tabs (Login vs Register) */}
           {mode !== 'forgot' && (
             <div className="flex border-b border-[#E2E8F0] mb-4 text-[14px]">
@@ -705,7 +988,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {/* Account Type Selector (CPF vs CNPJ) */}
+          {/* Account Type Selector (Candidato vs Empresa) */}
           {mode !== 'forgot' && (
             <div className="mb-4">
               <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#F4F7FE] rounded-xl border border-[#DBEAFE]">
@@ -733,10 +1016,58 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </button>
               </div>
               <p className="text-[12px] text-[#667085] mt-1.5">
-                {role === 'candidate'
+                {mode === 'login'
+                  ? 'Entre com seu E-mail e Senha ou com 1 clique pelo Google.'
+                  : registerStyle === 'email_only'
+                  ? 'Acesso rápido: crie sua conta usando somente E-mail e Senha (ou com o Google).'
+                  : role === 'candidate'
                   ? 'Uso interno exclusivo para validação de identidade (CPF protegido por LGPD).'
                   : 'Validação automática na Receita Federal: apenas CNPJs reais e ATIVOS podem anunciar.'}
               </p>
+            </div>
+          )}
+
+          {/* Seletor de Estilo de Cadastro: Apenas E-mail e Senha vs Cadastro Completo */}
+          {mode === 'register' && (
+            <div className="mb-4">
+              <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#F8FAFC] rounded-xl border border-[#E2E8F0]">
+                <button
+                  type="button"
+                  data-testid="register-mode-email-only"
+                  onClick={() => {
+                    setRegisterStyle('email_only');
+                    setErrorMsg('');
+                    setDocumentError('');
+                    setFieldErrors({});
+                  }}
+                  className={`min-h-[36px] px-2.5 rounded-lg text-[12px] font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                    registerStyle === 'email_only'
+                      ? 'bg-white text-[#1D4ED8] shadow-xs border border-[#BFDBFE]'
+                      : 'text-[#64748B] hover:text-[#1E293B]'
+                  }`}
+                >
+                  <Mail className="w-3.5 h-3.5 shrink-0" />
+                  <span>Apenas E-mail e Senha</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="register-mode-full"
+                  onClick={() => {
+                    setRegisterStyle('full');
+                    setErrorMsg('');
+                    setDocumentError('');
+                    setFieldErrors({});
+                  }}
+                  className={`min-h-[36px] px-2.5 rounded-lg text-[12px] font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer ${
+                    registerStyle === 'full'
+                      ? 'bg-white text-[#1D4ED8] shadow-xs border border-[#BFDBFE]'
+                      : 'text-[#64748B] hover:text-[#1E293B]'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span>Cadastro Completo ({role === 'candidate' ? 'CPF' : 'CNPJ'})</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -751,13 +1082,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           )}
 
           <form onSubmit={handleAuthSubmit} noValidate className="space-y-3.5">
-            {mode === 'register' && (
+            {mode === 'register' && registerStyle === 'email_only' && (
+              <div>
+                <label htmlFor="auth-name-quick" className="form-label">
+                  {role === 'candidate'
+                    ? 'Seu Nome (opcional)'
+                    : 'Nome da Empresa (opcional)'}
+                </label>
+                <input
+                  id="auth-name-quick"
+                  type="text"
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setFieldErrors((prev) => ({ ...prev, name: '' }));
+                  }}
+                  placeholder={
+                    role === 'candidate'
+                      ? 'Ex: Mariana Silva (ou deixe em branco)'
+                      : 'Ex: Supermercados Estrela (ou deixe em branco)'
+                  }
+                  className="form-control"
+                />
+              </div>
+            )}
+
+            {mode === 'register' && registerStyle === 'full' && (
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label htmlFor="auth-document" className="form-label">
-                      {role === 'candidate' ? 'CPF (11 dígitos) *' : 'CNPJ (14 dígitos) *'}
-                    </label>
+                    <div className="flex items-center justify-between gap-1.5 mb-1">
+                      <label htmlFor="auth-document" className="form-label mb-0">
+                        {role === 'candidate' ? 'CPF (11 dígitos) *' : 'CNPJ (14 dígitos) *'}
+                      </label>
+                      {documentInput.replace(/\D/g, '').length > 0 && (
+                        <span
+                          data-testid="detected-profile-badge"
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            role === 'company'
+                              ? 'bg-indigo-100 text-indigo-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {role === 'company'
+                            ? 'Perfil Empresa identificado'
+                            : 'Perfil Candidato identificado'}
+                        </span>
+                      )}
+                    </div>
                     <div className="relative">
                       <input
                         id="auth-document"
@@ -1023,12 +1395,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {mode === 'forgot' && (
               <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] space-y-3">
                 <p className="text-[12px] text-[#475569] leading-relaxed">
-                  Para redefinir sua senha imediatamente com segurança, informe o{' '}
-                  <strong>CPF ou CNPJ cadastrado</strong> e sua nova senha (ou deixe em branco para receber por e-mail):
+                  Para redefinir sua senha imediatamente com segurança, informe sua nova senha abaixo (e o{' '}
+                  <strong>CPF ou CNPJ</strong> caso tenha vinculado ao perfil):
                 </p>
                 <div>
                   <label htmlFor="auth-forgot-doc" className="text-[12px] font-semibold text-[#334155] block mb-1">
-                    CPF ou CNPJ do Titular (Verificação de Segurança)
+                    CPF ou CNPJ do Titular (se vinculado)
                   </label>
                   <input
                     id="auth-forgot-doc"
@@ -1075,18 +1447,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     </button>
                   )}
                 </div>
-                <input
-                  id="auth-password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setFieldErrors((prev) => ({ ...prev, password: '' }));
-                  }}
-                  placeholder="Mínimo de 6 caracteres"
-                  className={`form-control ${fieldErrors.password ? 'border-[#D92D20]' : ''}`}
-                />
+                <div className="relative">
+                  <input
+                    id="auth-password"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setFieldErrors((prev) => ({ ...prev, password: '' }));
+                    }}
+                    placeholder="Mínimo de 6 caracteres"
+                    className={`form-control pr-10 ${fieldErrors.password ? 'border-[#D92D20]' : ''}`}
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#64748B] hover:text-[#1E293B] p-1 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
                 {fieldErrors.password && (
                   <p className="text-xs font-medium text-[#D92D20] mt-1">
                     {fieldErrors.password}
@@ -1103,20 +1486,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {loading
                 ? 'Processando com segurança...'
                 : mode === 'forgot'
-                ? documentInput.trim() && password.trim()
-                  ? 'Verificar Documento e Redefinir Senha'
+                ? password.trim()
+                  ? 'Redefinir Senha Agora'
                   : 'Enviar link de recuperação'
                 : mode === 'register'
-                ? role === 'company'
+                ? registerStyle === 'email_only'
+                  ? `Criar Conta com E-mail e Senha (+${INITIAL_WELCOME_CREDITS} Créditos)`
+                  : role === 'company'
                   ? `Cadastrar Empresa e Ganhar +${INITIAL_WELCOME_CREDITS} Créditos`
                   : `Criar Conta e Ganhar +${INITIAL_WELCOME_CREDITS} Créditos Grátis`
-                : 'Entrar'}
+                : 'Entrar com E-mail e Senha'}
             </button>
 
             {mode === 'register' && (
               <p className="text-[11px] text-[#667085] text-center flex items-center justify-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                <span>Seus documentos e endereço são de uso estritamente interno e protegidos por LGPD.</span>
+                <span>
+                  {registerStyle === 'email_only'
+                    ? 'Cadastro instantâneo: você pode complementar seu perfil depois no painel.'
+                    : 'Seus documentos e endereço são de uso estritamente interno e protegidos por LGPD.'}
+                </span>
               </p>
             )}
           </form>
@@ -1125,12 +1514,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="mt-4">
               <div className="relative flex py-2 items-center">
                 <div className="grow border-t border-[#E2E8F0]" />
-                <span className="shrink mx-3 text-[12px] text-[#667085]">ou acesso rápido</span>
+                <span className="shrink mx-3 text-[12px] text-[#667085]">ou acesso com 1 clique</span>
                 <div className="grow border-t border-[#E2E8F0]" />
               </div>
 
               <button
                 type="button"
+                data-testid="google-signin-button"
                 onClick={handleGoogleSignIn}
                 disabled={loading}
                 className="w-full btn-base btn-md btn-secondary mt-1"
@@ -1166,6 +1556,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             >
               Voltar para o login
             </button>
+          )}
+            </>
           )}
         </div>
       </div>

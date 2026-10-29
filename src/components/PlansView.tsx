@@ -108,10 +108,10 @@ export const PlansView: React.FC<PlansViewProps> = ({
   };
 
   const allPackages: Array<{ pkg: CreditPackage; audience: 'candidate' | 'company' | 'both' }> = [
-    { pkg: CANDIDATE_RESUME_CREDIT_PACKAGE, audience: 'candidate' },
-    { pkg: CREDIT_PACKAGES[0], audience: 'both' },
-    { pkg: CREDIT_PACKAGES[1], audience: 'company' },
-    { pkg: CREDIT_PACKAGES[2], audience: 'company' },
+    { pkg: CREDIT_PACKAGES[0], audience: 'both' }, // 10 créditos — R$ 14,90
+    { pkg: CANDIDATE_RESUME_CREDIT_PACKAGE, audience: 'both' }, // 15 créditos — R$ 19,90
+    { pkg: CREDIT_PACKAGES[1], audience: 'both' }, // 35 créditos (30+5) — R$ 44,90
+    { pkg: CREDIT_PACKAGES[2], audience: 'company' }, // 100 créditos (80+20) — R$ 109,90
   ];
 
   const visiblePackages = allPackages.filter((item) => {
@@ -123,7 +123,7 @@ export const PlansView: React.FC<PlansViewProps> = ({
   const currentCredits = currentUser?.credits ?? 0;
 
   return (
-    <div className="min-h-screen bg-[#F4F7FE] py-8 md:py-12">
+    <div id="creditos" className="min-h-screen bg-[#F4F7FE] py-8 md:py-12 scroll-mt-24">
       <div className="container-app max-w-6xl space-y-8">
         {/* 1. CABEÇALHO E CARTEIRA DO USUÁRIO */}
         <section className="bg-white border border-[#DBEAFE] rounded-2xl p-6 md:p-8 shadow-sm">
@@ -210,62 +210,96 @@ export const PlansView: React.FC<PlansViewProps> = ({
             )}
           </div>
 
-          {/* 2. TABELA CLARA DE USO DE CRÉDITOS */}
+          {/* 2. SEPARAÇÃO VISUAL CLARA DE CONSUMO DE CRÉDITOS: CANDIDATOS (CPF) vs. EMPRESAS (CNPJ) */}
           <div className="mt-6 pt-6 border-t border-[#E2E8F0]">
-            <div className="text-[12px] font-bold uppercase tracking-wider text-[#64748B] mb-3">
-              Tabela Transparente de Utilização
+            <div className="text-[12px] font-bold uppercase tracking-wider text-[#64748B] mb-3.5">
+              Como utilizar seus créditos (Candidatos vs. Empresas)
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <Send className="w-4 h-4 text-[#2563EB] shrink-0" />
-                  <div>
-                    <div className="text-[13px] font-bold text-[#0F172A]">Candidatar-se a vaga</div>
-                    <div className="text-[11px] text-[#64748B]">Envio direto à empresa</div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Card 1: Para Candidatos (CPF) */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-[#F8FAFC] border border-[#DBEAFE] space-y-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#E2E8F0]">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#2563EB]" />
+                    <h2 className="text-[14px] font-extrabold text-[#0F172A]">
+                      Para Candidatos (CPF)
+                    </h2>
+                  </div>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]">
+                    <Sparkles className="w-3 h-3" /> +{INITIAL_FREE_CREDITS} créditos grátis no cadastro
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="p-3 rounded-xl bg-white border border-[#E2E8F0] flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <Send className="w-4 h-4 text-[#2563EB] shrink-0" />
+                      <div>
+                        <div className="text-[13px] font-bold text-[#0F172A]">Candidatar-se</div>
+                        <div className="text-[11px] text-[#64748B]">Envio direto à empresa</div>
+                      </div>
+                    </div>
+                    <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                      {APPLY_JOB_CREDIT_COST} cr
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white border border-[#E2E8F0] flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <FileText className="w-4 h-4 text-[#2563EB] shrink-0" />
+                      <div>
+                        <div className="text-[13px] font-bold text-[#0F172A]">Gerar Currículo ATS</div>
+                        <div className="text-[11px] text-[#64748B]">3 modelos em PDF com IA</div>
+                      </div>
+                    </div>
+                    <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                      {RESUME_PDF_CREDIT_COST} cr
+                    </span>
                   </div>
                 </div>
-                <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
-                  {APPLY_JOB_CREDIT_COST} cr
-                </span>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <FileText className="w-4 h-4 text-[#2563EB] shrink-0" />
-                  <div>
-                    <div className="text-[13px] font-bold text-[#0F172A]">Currículo PDF com IA</div>
-                    <div className="text-[11px] text-[#64748B]">Padrão ATS pronto p/ envio</div>
+              {/* Card 2: Para Empresas (CNPJ) */}
+              <div id="para-empresas" className="p-4 sm:p-5 rounded-2xl bg-[#F8FAFC] border border-[#DBEAFE] space-y-3.5 scroll-mt-24">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#E2E8F0]">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#1E40AF]" />
+                    <h2 className="text-[14px] font-extrabold text-[#0F172A]">
+                      Para Empresas (CNPJ)
+                    </h2>
                   </div>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-[#EFF6FF] text-[#1E40AF] border border-[#BFDBFE]">
+                    +{INITIAL_FREE_CREDITS} créditos grátis no 1º cadastro
+                  </span>
                 </div>
-                <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
-                  {RESUME_PDF_CREDIT_COST} cr
-                </span>
-              </div>
 
-              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <Briefcase className="w-4 h-4 text-[#2563EB] shrink-0" />
-                  <div>
-                    <div className="text-[13px] font-bold text-[#0F172A]">Publicar nova vaga</div>
-                    <div className="text-[11px] text-[#64748B]">Ativa por 30 dias no mural</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="p-3 rounded-xl bg-white border border-[#E2E8F0] flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <Briefcase className="w-4 h-4 text-[#2563EB] shrink-0" />
+                      <div>
+                        <div className="text-[13px] font-bold text-[#0F172A]">Publicar vaga</div>
+                        <div className="text-[11px] text-[#64748B]">Ativa por 30 dias no mural</div>
+                      </div>
+                    </div>
+                    <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                      {POST_JOB_CREDIT_COST} cr
+                    </span>
                   </div>
-                </div>
-                <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
-                  {POST_JOB_CREDIT_COST} cr
-                </span>
-              </div>
 
-              <div className="p-3.5 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <Sparkles className="w-4 h-4 text-[#2563EB] shrink-0" />
-                  <div>
-                    <div className="text-[13px] font-bold text-[#0F172A]">Destacar vaga no topo</div>
-                    <div className="text-[11px] text-[#64748B]">Prioridade nas buscas</div>
+                  <div className="p-3 rounded-xl bg-white border border-[#E2E8F0] flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <Sparkles className="w-4 h-4 text-[#2563EB] shrink-0" />
+                      <div>
+                        <div className="text-[13px] font-bold text-[#0F172A]">Destacar vaga no topo</div>
+                        <div className="text-[11px] text-[#64748B]">Prioridade nas buscas</div>
+                      </div>
+                    </div>
+                    <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
+                      {BOOST_JOB_CREDIT_COST} cr
+                    </span>
                   </div>
                 </div>
-                <span className="text-[13px] font-extrabold text-[#1E40AF] tabular-nums shrink-0">
-                  {BOOST_JOB_CREDIT_COST} cr
-                </span>
               </div>
             </div>
           </div>
@@ -330,6 +364,10 @@ export const PlansView: React.FC<PlansViewProps> = ({
           >
             {visiblePackages.map(({ pkg }) => {
               const isHighlighted = Boolean(pkg.isFeatured);
+              const displayBadge =
+                pkg.id === 'pack_30'
+                  ? 'Mais Popular / Melhor Custo-Benefício'
+                  : pkg.badge;
               return (
                 <div
                   key={pkg.id}
@@ -340,15 +378,15 @@ export const PlansView: React.FC<PlansViewProps> = ({
                       : 'border border-[#DBEAFE] shadow-sm hover:border-[#93C5FD]'
                   }`}
                 >
-                  {pkg.badge && (
+                  {displayBadge && (
                     <div
-                      className={`text-[10px] font-extrabold uppercase tracking-wider mb-3 inline-flex self-start px-2.5 py-0.5 rounded-md ${
+                      className={`text-[10px] font-extrabold uppercase tracking-wider mb-3 inline-flex self-start px-2.5 py-1 rounded-md ${
                         isHighlighted
                           ? 'bg-[#1E40AF] text-white'
                           : 'bg-[#EFF6FF] text-[#1E40AF]'
                       }`}
                     >
-                      {pkg.badge}
+                      {displayBadge}
                     </div>
                   )}
 

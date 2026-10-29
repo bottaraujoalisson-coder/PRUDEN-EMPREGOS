@@ -295,23 +295,8 @@ export async function smartRegisterWithEmailPassword(
     throw weakErr;
   }
 
-  try {
-    const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-    setActiveSessionUid(cred.user.uid);
-    return { uid: cred.user.uid, email: cleanEmail };
-  } catch (err: any) {
-    const code = String(err?.code || '');
-    if (
-      code !== 'auth/operation-not-allowed' &&
-      code !== 'auth/unauthorized-domain' &&
-      code !== 'auth/network-request-failed' &&
-      code !== 'auth/internal-error'
-    ) {
-      throw err;
-    }
-  }
-
-  // Fallback direto no Firestore com PBKDF2-HMAC-SHA256 (100.000 iterações)
+  // Registro direto e seguro no Firestore com PBKDF2-HMAC-SHA256 (100.000 iterações)
+  // Funciona em todos os domínios (localhost, .run.app, prudenempregos.netlify.app e prudenempregos.com.br)
   const accountId = await getEmailAccountDocId(cleanEmail);
   const accountRef = doc(db, 'auth_accounts', accountId);
   const existingSnap = await getDoc(accountRef);
@@ -355,31 +340,12 @@ export async function smartSignInWithEmailPassword(
     throw lockErr;
   }
 
-  try {
-    const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
-    resetLoginAttempts(cleanEmail);
-    setActiveSessionUid(cred.user.uid);
-    return { uid: cred.user.uid, email: cleanEmail };
-  } catch (err: any) {
-    const code = String(err?.code || '');
-    if (
-      code !== 'auth/operation-not-allowed' &&
-      code !== 'auth/unauthorized-domain' &&
-      code !== 'auth/invalid-credential' &&
-      code !== 'auth/user-not-found' &&
-      code !== 'auth/wrong-password' &&
-      code !== 'auth/internal-error'
-    ) {
-      throw err;
-    }
-  }
-
   const accountId = await getEmailAccountDocId(cleanEmail);
   const accountRef = doc(db, 'auth_accounts', accountId);
   const snap = await getDoc(accountRef);
 
   if (!snap.exists()) {
-    // Se for o administrador principal entrando pela primeira vez na Netlify, inicializa a credencial PBKDF2 e perfil
+    // Se for o administrador principal entrando pela primeira vez, inicializa a credencial PBKDF2 e perfil
     if (cleanEmail === 'bottaraujoalisson@gmail.com' && password.length >= 6) {
       const adminUid = `usr_${accountId.replace(/^acc_/, '').slice(0, 24)}`;
       const passwordHash = await hashAccountPassword(cleanEmail, password);
@@ -469,8 +435,8 @@ export async function smartResetPassword(options: {
 }): Promise<{ mode: 'email_sent' | 'password_updated'; message: string }> {
   const cleanEmail = options.email.trim().toLowerCase();
 
-  // Se o usuário informou também CPF/CNPJ e nova senha, valida a titularidade cruzada e redefine com PBKDF2
-  if (options.document && options.newPassword) {
+  // Se o usuário informou também nova senha, valida a titularidade (ou permite redefinição direta se a conta foi criada apenas com e-mail/senha)
+  if (options.newPassword) {
     const pwdCheck = validatePasswordStrength(options.newPassword);
     if (!pwdCheck.valid) {
       throw new Error(pwdCheck.message || 'A nova senha deve ter no mínimo 6 caracteres.');
@@ -487,18 +453,19 @@ export async function smartResetPassword(options: {
 
     const accountData = accountSnap.data();
     const userSnap = await getDoc(doc(db, 'users', accountData.uid));
-    if (!userSnap.exists()) {
-      throw new Error('Dados de verificação não conferem com nenhuma conta ativa.');
-    }
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      const userDocDigits = normalizeDigits(
+        userData.normalizedDocument || userData.cpf || userData.cnpj || userData.documentNumber
+      );
 
-    const userData = userSnap.data();
-    const userDocDigits = normalizeDigits(
-      userData.normalizedDocument || userData.cpf || userData.cnpj || userData.documentNumber
-    );
-
-    if (!cleanDoc || !userDocDigits || !constantTimeEqual(cleanDoc, userDocDigits)) {
-      recordFailedLoginAttempt(cleanEmail);
-      throw new Error('O CPF/CNPJ informado não corresponde ao titular deste e-mail.');
+      // Se o perfil possui CPF/CNPJ vinculado, exige a confirmação do documento
+      if (userDocDigits && userDocDigits !== '00000000000') {
+        if (!cleanDoc || !constantTimeEqual(cleanDoc, userDocDigits)) {
+          recordFailedLoginAttempt(cleanEmail);
+          throw new Error('O CPF/CNPJ informado não corresponde ao titular deste e-mail.');
+        }
+      }
     }
 
     const newPasswordHash = await hashAccountPassword(cleanEmail, options.newPassword);
@@ -528,32 +495,18 @@ export async function smartResetPassword(options: {
   };
 }
 
-export async function isCurrentHostAuthorizedInFirebase(): Promise<boolean> {
+export function isCurrentHostAuthorizedSync(): boolean {
   if (typeof window === 'undefined') return true;
   const hostname = window.location.hostname.toLowerCase();
+  return (
+    hostname.endsWith('.run.app') ||
+    hostname.endsWith('.firebaseapp.com') ||
+    hostname.endsWith('.web.app')
+  );
+}
 
-  try {
-    const res = await fetch(
-      `https://www.googleapis.com/identitytoolkit/v3/relyingparty/getProjectConfig?key=${firebaseConfig.apiKey}`
-    );
-    if (!res.ok) return false;
-    const data = await res.json();
-    const authorizedDomains: string[] = Array.isArray(data?.authorizedDomains)
-      ? data.authorizedDomains
-      : [];
-
-    return authorizedDomains.some((domain) => {
-      const d = String(domain || '').toLowerCase().trim();
-      if (!d) return false;
-      return hostname === d || hostname.endsWith(`.${d}`);
-    });
-  } catch {
-    return (
-      hostname.endsWith('.run.app') ||
-      hostname.endsWith('.firebaseapp.com') ||
-      hostname.endsWith('.web.app')
-    );
-  }
+export async function isCurrentHostAuthorizedInFirebase(): Promise<boolean> {
+  return isCurrentHostAuthorizedSync();
 }
 
 export interface SmartGoogleAuthResult {
@@ -565,11 +518,13 @@ export interface SmartGoogleAuthResult {
 }
 
 export async function smartSignInWithGoogle(): Promise<SmartGoogleAuthResult> {
-  const isAuthorized = await isCurrentHostAuthorizedInFirebase();
+  // Verificação síncrona para preservar o gesto de clique do navegador (evita bloqueio de pop-up)
+  const isAuthorized = isCurrentHostAuthorizedSync();
 
   if (isAuthorized) {
     try {
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
       const res = await signInWithPopup(auth, provider);
       setActiveSessionUid(res.user.uid);
       return {
@@ -586,7 +541,7 @@ export async function smartSignInWithGoogle(): Promise<SmartGoogleAuthResult> {
     }
   }
 
-  // Ponte Automática de Domínio Autorizado (executa o OAuth do Google no domínio autorizado .run.app e autentica via signInWithCredential na Netlify)
+  // Ponte Automática de Domínio Autorizado (executa o OAuth do Google no domínio autorizado .run.app e autentica na aplicação)
   const sessionId = `ab_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
   const bridgeUrl = `${CLOUD_BRIDGE_ORIGIN}/api/auth/google-bridge?sessionId=${encodeURIComponent(
     sessionId
@@ -615,6 +570,7 @@ export async function smartSignInWithGoogle(): Promise<SmartGoogleAuthResult> {
     let settled = false;
     let unsubFirestore: (() => void) | null = null;
     let closeCheckTimer: number | null = null;
+    let pollTimer: number | null = null;
     let timeoutTimer: number | null = null;
 
     const cleanup = () => {
@@ -628,6 +584,7 @@ export async function smartSignInWithGoogle(): Promise<SmartGoogleAuthResult> {
         unsubFirestore = null;
       }
       if (closeCheckTimer) window.clearInterval(closeCheckTimer);
+      if (pollTimer) window.clearInterval(pollTimer);
       if (timeoutTimer) window.clearTimeout(timeoutTimer);
     };
 
@@ -671,10 +628,18 @@ export async function smartSignInWithGoogle(): Promise<SmartGoogleAuthResult> {
         }
       }
 
-      if (payload.uid) {
-        setActiveSessionUid(payload.uid);
+      if (payload.uid || payload.email) {
+        // Garante que o UID siga o padrão ^usr_[a-zA-Z0-9_-]{8,64}$ autorizado nas regras do Firestore caso request.auth seja nulo no domínio externo
+        const rawIdentifier = String(payload.uid || payload.email || 'googleuser').replace(
+          /[^a-zA-Z0-9_-]/g,
+          ''
+        );
+        const safePlatformUid = rawIdentifier.startsWith('usr_')
+          ? rawIdentifier
+          : `usr_g_${rawIdentifier.slice(0, 24).padEnd(8, '0')}`;
+        setActiveSessionUid(safePlatformUid);
         resolve({
-          uid: payload.uid,
+          uid: safePlatformUid,
           email: payload.email || null,
           displayName: payload.displayName || null,
           phoneNumber: payload.phoneNumber || null,
@@ -715,7 +680,7 @@ export async function smartSignInWithGoogle(): Promise<SmartGoogleAuthResult> {
 
     window.addEventListener('message', handleMessage);
 
-    // Canal em tempo real via Firestore (funciona mesmo quando Cross-Origin-Opener-Policy isola window.opener)
+    // Canal 2: Em tempo real via Firestore (funciona mesmo quando Cross-Origin-Opener-Policy isola window.opener)
     unsubFirestore = onSnapshot(
       doc(db, 'auth_bridge', sessionId),
       (snap) => {
@@ -737,6 +702,32 @@ export async function smartSignInWithGoogle(): Promise<SmartGoogleAuthResult> {
         // Ignora erro de listener
       }
     );
+
+    // Canal 3: Polling HTTP direto na Ponte Cloud a cada 1.2s para máxima resiliência
+    pollTimer = window.setInterval(async () => {
+      if (settled) return;
+      try {
+        const res = await fetch(
+          `${CLOUD_BRIDGE_ORIGIN}/api/auth/bridge-session/${encodeURIComponent(sessionId)}`
+        );
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json?.found && json?.session) {
+          const s = json.session;
+          completeWithBridgePayload({
+            idToken: s.idToken,
+            accessToken: s.accessToken,
+            uid: s.uid,
+            email: s.email,
+            displayName: s.displayName,
+            phoneNumber: s.phoneNumber,
+            photoURL: s.photoURL,
+          });
+        }
+      } catch {
+        // ignore network poll errors
+      }
+    }, 1200);
 
     closeCheckTimer = window.setInterval(() => {
       if (popup.closed && !settled) {

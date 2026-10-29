@@ -16,6 +16,7 @@ import {
   REGIONAL_CITIES,
   CATEGORY_SKILL_ANCHORS,
   calculateCandidateProgressCoach,
+  getMatchColor,
 } from '../utils/matchAlgorithm';
 import {
   formatCEP,
@@ -54,14 +55,20 @@ import {
   AlertCircle,
   Camera,
   Check,
+  Bell,
+  Printer,
+  Eye,
 } from 'lucide-react';
+import { CnhCategory, VehicleRequirement } from '../types';
+
+export type CandidateDashboardTab = 'applications' | 'resume' | 'saved' | 'alerts';
 
 interface CandidateDashboardProps {
   user: UserProfile;
   jobs: Job[];
   applications: Application[];
-  activeSubTab?: 'applications' | 'resume' | 'saved';
-  onSubTabChange?: (tab: 'applications' | 'resume' | 'saved') => void;
+  activeSubTab?: CandidateDashboardTab;
+  onSubTabChange?: (tab: CandidateDashboardTab) => void;
   onUpdateProfile: (updatedData: Partial<UserProfile>) => Promise<void>;
   onWithdrawApplication: (appId: string) => Promise<void>;
   onToggleSaveJob?: (jobId: string) => void;
@@ -74,10 +81,10 @@ interface CandidateDashboardProps {
 }
 
 const WIZARD_STEPS = [
-  { id: 1, title: 'Dados Básicos', shortLabel: '1. Básicos' },
-  { id: 2, title: 'Experiências', shortLabel: '2. Experiências' },
-  { id: 3, title: 'Competências', shortLabel: '3. Competências' },
-  { id: 4, title: 'Revisão e PDF', shortLabel: '4. Revisão' },
+  { id: 1, title: 'Dados Pessoais', shortLabel: '1. Pessoais' },
+  { id: 2, title: 'Experiências e Formação', shortLabel: '2. Experiências' },
+  { id: 3, title: 'Habilidades e CNH', shortLabel: '3. Habilidades' },
+  { id: 4, title: 'Preview e Currículo ATS', shortLabel: '4. Currículo ATS' },
 ] as const;
 
 export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
@@ -96,7 +103,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
   onNavigate,
   onViewJobDetails,
 }) => {
-  const [activeTab, setActiveTab] = useState<'applications' | 'resume' | 'saved'>(activeSubTab);
+  const [activeTab, setActiveTab] = useState<CandidateDashboardTab>(activeSubTab);
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
 
   useEffect(() => {
@@ -127,11 +134,29 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     salaryExpectation: user.salaryExpectation || '',
     phone: user.phone || '',
     linkedinUrl: user.linkedinUrl || '',
+    videoPitchUrl: user.videoPitchUrl || '',
     about: user.about || '',
     skillsStr: user.skills ? user.skills.join(', ') : '',
     certificationsStr: user.certifications ? user.certifications.join(', ') : '',
     languagesStr: user.languages ? user.languages.join(', ') : 'Português (Nativo)',
+    cnhCategory: (user.cnhCategory || 'nao') as CnhCategory,
+    ownVehicle: (user.ownVehicle || 'nao') as VehicleRequirement,
   });
+
+  const [jobAlertsEnabled, setJobAlertsEnabled] = useState<boolean>(
+    user.jobAlertsEnabled ?? true
+  );
+  const [jobAlertAreas, setJobAlertAreas] = useState<string[]>(
+    user.jobAlertAreas && user.jobAlertAreas.length > 0
+      ? user.jobAlertAreas
+      : ['Administrativo', 'Comércio', 'Tecnologia', 'Primeiro Emprego']
+  );
+  const [jobAlertWorkModels, setJobAlertWorkModels] = useState<string[]>(
+    user.jobAlertWorkModels && user.jobAlertWorkModels.length > 0
+      ? user.jobAlertWorkModels
+      : ['Presencial', 'Híbrido']
+  );
+  const [savingAlerts, setSavingAlerts] = useState(false);
 
   const [experiences, setExperiences] = useState<ResumeExperience[]>(user.experiences || []);
   const [educationHistory, setEducationHistory] = useState<ResumeEducation[]>(
@@ -274,9 +299,41 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     );
   }
 
-  const handleSelectTab = (tab: 'applications' | 'resume' | 'saved') => {
+  const handleSelectTab = (tab: CandidateDashboardTab) => {
     setActiveTab(tab);
     onSubTabChange?.(tab);
+  };
+
+  const handleToggleAlertArea = (area: string) => {
+    setJobAlertAreas((prev) =>
+      prev.includes(area) ? prev.filter((a) => a !== area) : [...prev, area]
+    );
+  };
+
+  const handleToggleAlertWorkModel = (model: string) => {
+    setJobAlertWorkModels((prev) =>
+      prev.includes(model) ? prev.filter((m) => m !== model) : [...prev, model]
+    );
+  };
+
+  const handleSaveJobAlerts = async () => {
+    setSavingAlerts(true);
+    try {
+      await onUpdateProfile({
+        jobAlertsEnabled,
+        jobAlertAreas,
+        jobAlertWorkModels,
+      });
+      showToast(
+        jobAlertsEnabled
+          ? 'Alertas de vagas em Presidente Prudente atualizados e ativados!'
+          : 'Notificações de vagas pausadas.'
+      );
+    } catch {
+      showToast('Não foi possível salvar os alertas de vagas.', 'error');
+    } finally {
+      setSavingAlerts(false);
+    }
   };
 
   const myApplications = useMemo(() => {
@@ -534,10 +591,13 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
         salaryExpectation: formData.salaryExpectation.trim(),
         phone: formData.phone ? formatPhone(formData.phone) : '',
         linkedinUrl: formData.linkedinUrl.trim(),
+        videoPitchUrl: formData.videoPitchUrl.trim(),
         about: formData.about.trim(),
         skills: parsedSkillsList,
         certifications: parsedCertificationsList,
         languages: parsedLanguagesList,
+        cnhCategory: formData.cnhCategory,
+        ownVehicle: formData.ownVehicle,
         experiences,
         educationHistory,
         profileCompleteness: liveProgressCoach.percentage,
@@ -629,81 +689,147 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
   const currentCredits = Number(user.credits || 0);
   const wizardProgressPercent = wizardStep * 25;
 
+  const getColoredStatusBadge = (status?: string) => {
+    const raw = (status ?? 'enviado').trim().toLowerCase();
+    if (raw === 'visualizado') {
+      return {
+        label: 'Visualizado pela Empresa',
+        className: 'bg-[#EFF6FF] text-[#1D4ED8] border border-[#BFDBFE]',
+      };
+    }
+    if (raw === 'convocado' || raw === 'entrevista' || raw === 'aprovado' || raw === 'em_analise' || raw === 'em análise') {
+      return {
+        label: 'Em Entrevista',
+        className: 'bg-[#ECFDF5] text-[#059669] border border-[#A7F3D0]',
+      };
+    }
+    if (raw === 'encerrado' || raw === 'rejeitado') {
+      return {
+        label: 'Encerrado',
+        className: 'bg-slate-100 text-slate-600 border border-slate-200',
+      };
+    }
+    const base = getApplicationStatusDisplay(status);
+    return {
+      label: base.normalized === 'enviado' ? 'Currículo Enviado' : base.label,
+      className: 'bg-[#FEF3C7] text-[#B45309] border border-[#FDE68A]',
+    };
+  };
+
   return (
     <div className="min-h-screen bg-[#F4F7FE] pb-16">
-      {/* Centered Blue Candidate Header */}
+      {/* Centered Blue Candidate Header with Greeting, Credit Balance & Profile Progress Bar */}
       <div className="bg-gradient-to-b from-[#1E40AF] to-[#2563EB] text-white border-b border-[#1D4ED8] py-6">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
-          <div className="flex flex-col sm:flex-row items-center gap-3.5 min-w-0">
-            <div className="relative shrink-0">
-              {photoDataUrl ? (
-                <img
-                  src={photoDataUrl}
-                  alt={user.name}
-                  className="w-14 h-14 rounded-full object-cover border-2 border-white/30 bg-[#1E3A8A]"
-                />
-              ) : (
-                <div className="w-14 h-14 rounded-full bg-white/15 border-2 border-white/25 text-white font-bold text-lg flex items-center justify-center">
-                  {(user.name || 'C').charAt(0).toUpperCase()}
-                </div>
-              )}
-              <label
-                htmlFor="cand-header-photo-upload"
-                title="Alterar foto de perfil"
-                className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-white text-[#1E40AF] hover:bg-blue-50 flex items-center justify-center border border-[#93C5FD] cursor-pointer shadow-xs"
-              >
-                <Camera className="w-3 h-3" />
-                <input
-                  id="cand-header-photo-upload"
-                  type="file"
-                  accept="image/*"
-                  onChange={handlePhotoUpload}
-                  className="hidden"
-                />
-              </label>
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 space-y-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+            <div className="flex flex-col sm:flex-row items-center gap-3.5 min-w-0">
+              <div className="relative shrink-0">
+                {photoDataUrl ? (
+                  <img
+                    src={photoDataUrl}
+                    alt={user.name}
+                    className="w-14 h-14 rounded-full object-cover border-2 border-white/30 bg-[#1E3A8A]"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-full bg-white/15 border-2 border-white/25 text-white font-bold text-lg flex items-center justify-center">
+                    {(user.name || 'C').charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <label
+                  htmlFor="cand-header-photo-upload"
+                  title="Alterar foto de perfil"
+                  className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-white text-[#1E40AF] hover:bg-blue-50 flex items-center justify-center border border-[#93C5FD] cursor-pointer shadow-xs"
+                >
+                  <Camera className="w-3 h-3" />
+                  <input
+                    id="cand-header-photo-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              <div className="min-w-0">
+                <h1 className="text-[20px] sm:text-[24px] font-bold text-white truncate">
+                  Olá, {user.name}
+                </h1>
+                <p className="text-[13px] text-blue-100 mt-0.5 truncate">
+                  {headerSubtitle}
+                </p>
+              </div>
             </div>
 
-            <div className="min-w-0">
-              <h1 className="text-[20px] sm:text-[24px] font-bold text-white truncate">
-                {user.name}
-              </h1>
-              <p className="text-[13px] text-blue-100 mt-0.5 truncate">
-                {headerSubtitle}
-              </p>
+            <div className="flex items-center gap-2.5 shrink-0">
+              <div className="inline-flex items-center gap-2 bg-white/15 border border-white/25 px-3.5 py-2 rounded-xl">
+                <Coins className="w-4 h-4 text-amber-300 shrink-0" />
+                <span
+                  data-testid="candidate-header-credits"
+                  className="text-[13px] font-semibold text-white tabular-nums whitespace-nowrap"
+                >
+                  {currentCredits} cr disponíveis
+                </span>
+                {onSelectCreditPackage ? (
+                  <button
+                    type="button"
+                    onClick={() => onSelectCreditPackage(CANDIDATE_RESUME_CREDIT_PACKAGE)}
+                    data-testid="candidate-add-credits-btn"
+                    className="ml-1 px-2.5 py-1 rounded-lg bg-white text-[#1E40AF] hover:bg-blue-50 text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Recarregar créditos
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('plans')}
+                    className="ml-1 px-2.5 py-1 rounded-lg bg-white text-[#1E40AF] hover:bg-blue-50 text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Recarregar créditos
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="inline-flex items-center gap-2 bg-white/15 border border-white/25 px-3.5 py-2 rounded-lg">
-              <Coins className="w-4 h-4 text-amber-300 shrink-0" />
-              <span
-                data-testid="candidate-header-credits"
-                className="text-[13px] font-semibold text-white tabular-nums whitespace-nowrap"
-              >
-                {currentCredits} créditos
-              </span>
-              {onSelectCreditPackage && (
-                <button
-                  type="button"
-                  onClick={() => onSelectCreditPackage(CANDIDATE_RESUME_CREDIT_PACKAGE)}
-                  data-testid="candidate-add-credits-btn"
-                  className="ml-1 px-2.5 py-1 rounded-md bg-white text-[#1E40AF] hover:bg-blue-50 text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap"
-                >
-                  + Recarregar
-                </button>
-              )}
+          {/* Barra de Progresso do Perfil no Cabeçalho */}
+          <div className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex-1 space-y-1.5">
+              <div className="flex items-center justify-between gap-2 text-[12px] sm:text-[13px] font-semibold text-white">
+                <span>
+                  Perfil {liveProgressCoach.percentage}% completo — complete para aumentar suas chances
+                </span>
+                <span className="tabular-nums text-amber-200 font-bold">
+                  {liveProgressCoach.percentage}%
+                </span>
+              </div>
+              <div className="w-full h-2 bg-white/20 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-amber-300 transition-all duration-300 rounded-full"
+                  style={{ width: `${liveProgressCoach.percentage}%` }}
+                />
+              </div>
             </div>
+            {activeTab !== 'resume' && (
+              <button
+                type="button"
+                onClick={() => handleSelectTab('resume')}
+                className="px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[12px] font-semibold transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                Completar perfil →
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Centered Sub-Navigation Bar */}
       <div className="bg-white border-b border-[#DBEAFE] mb-8">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6">
           <div
             role="tablist"
             aria-label="Navegação do painel do candidato"
-            className="flex items-center justify-between sm:justify-center gap-2 sm:gap-10"
+            className="flex items-center justify-between sm:justify-center gap-2 sm:gap-8 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             <button
               type="button"
@@ -716,11 +842,12 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                   : 'border-transparent text-[#64748B] hover:text-[#0F172A] font-medium'
               }`}
             >
-              {tabApplicationsLabel}
+              Minhas {tabApplicationsLabel}
             </button>
             <button
               type="button"
               role="tab"
+              title={tabResumeLabel}
               aria-selected={activeTab === 'resume'}
               onClick={() => handleSelectTab('resume')}
               className={`py-3.5 px-2 text-center text-[13px] sm:text-[14px] border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer tabular-nums ${
@@ -729,7 +856,21 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                   : 'border-transparent text-[#64748B] hover:text-[#0F172A] font-medium'
               }`}
             >
-              {tabResumeLabel}
+              Meu Perfil e Currículo ATS ({liveProgressCoach.percentage}%)
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'alerts'}
+              onClick={() => handleSelectTab('alerts')}
+              className={`py-3.5 px-2 text-center text-[13px] sm:text-[14px] border-b-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer inline-flex items-center gap-1.5 ${
+                activeTab === 'alerts'
+                  ? 'border-[#1D4ED8] text-[#1D4ED8] font-bold'
+                  : 'border-transparent text-[#64748B] hover:text-[#0F172A] font-medium'
+              }`}
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>Alertas de Vagas</span>
             </button>
             <button
               type="button"
@@ -749,8 +890,8 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
       </div>
 
       {/* Main Centered Container */}
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 space-y-6">
-        {/* TAB 1: APPLICATIONS */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 space-y-6">
+        {/* TAB 1: MINHAS CANDIDATURAS */}
         {activeTab === 'applications' && (
           <section className="space-y-4">
             {myApplications.length === 0 ? (
@@ -762,7 +903,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                   Nenhuma candidatura enviada
                 </h2>
                 <p className="text-[14px] text-[#64748B] mb-6 max-w-md mx-auto leading-relaxed">
-                  Explore as vagas abertas na região e envie seu currículo diretamente para as empresas ({APPLY_JOB_CREDIT_COST} créditos por candidatura).
+                  Explore as vagas abertas em Presidente Prudente e envie seu currículo diretamente para as empresas ({APPLY_JOB_CREDIT_COST} créditos por candidatura).
                 </p>
                 <button
                   type="button"
@@ -775,9 +916,26 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
             ) : (
               <div className="space-y-3">
                 {myApplications.map((app) => {
-                  const statusBadge = getApplicationStatusDisplay(app.status);
+                  const coloredBadge = getColoredStatusBadge(app.status);
                   const hasScreening =
                     typeof app.screeningTotal === 'number' && app.screeningTotal > 0;
+                  const matchedJob =
+                    jobs.find((j) => j.id === app.jobId) ||
+                    ({
+                      id: app.jobId,
+                      companyId: app.companyId,
+                      companyName: app.companyName,
+                      title: app.jobTitle,
+                      location: app.jobLocation || 'Presidente Prudente, SP',
+                      category: 'Geral',
+                      workModel: 'Presencial',
+                      contract: 'CLT',
+                      experience: 'Qualquer Nível',
+                      description: 'Vaga aplicada através do portal PrudenEmpregos.',
+                      skills: app.matchingSkills || [],
+                      status: 'active',
+                      createdAt: app.appliedAt,
+                    } as Job);
 
                   return (
                     <article
@@ -789,8 +947,17 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                           <h3 className="text-[16px] font-semibold text-[#0F172A]">
                             {app.jobTitle}
                           </h3>
-                          <span className="text-[12px] font-semibold text-[#1D4ED8] tabular-nums">
-                            · Compatibilidade: {app.matchScore}%
+                          <span
+                            className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold ${coloredBadge.className}`}
+                          >
+                            {coloredBadge.label}
+                          </span>
+                          <span
+                            className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold border tabular-nums ${getMatchColor(
+                              app.matchScore
+                            )}`}
+                          >
+                            Match: {app.matchScore}%
                           </span>
                           {hasScreening && (
                             <span className="text-[12px] font-medium text-[#16835D] tabular-nums">
@@ -820,14 +987,19 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                         )}
                       </div>
 
-                      <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#F1F5F9]">
-                        <span className="text-[12px] font-semibold text-[#334155]">
-                          {statusBadge.label}
-                        </span>
+                      <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#F1F5F9]">
+                        <button
+                          type="button"
+                          onClick={() => onViewJobDetails(matchedJob)}
+                          className="btn-base btn-sm btn-secondary inline-flex items-center gap-1.5 text-[12px] font-semibold"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-[#2563EB]" />
+                          <span>Ver detalhes da vaga</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => onWithdrawApplication(app.id)}
-                          className="text-[12px] font-medium text-[#C0393B] hover:underline cursor-pointer whitespace-nowrap"
+                          className="text-[12px] font-medium text-[#C0393B] hover:underline cursor-pointer whitespace-nowrap px-2"
                         >
                           Retirar
                         </button>
@@ -1192,6 +1364,20 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                       className="form-control"
                     />
                   </div>
+
+                  <div className="sm:col-span-2">
+                    <label htmlFor="cand-video-pitch" className="form-label">
+                      Link de Vídeo-Apresentação (YouTube / Loom — opcional)
+                    </label>
+                    <input
+                      id="cand-video-pitch"
+                      type="url"
+                      value={formData.videoPitchUrl}
+                      onChange={(e) => setFormData({ ...formData, videoPitchUrl: e.target.value })}
+                      placeholder="https://www.youtube.com/watch?v=... ou https://www.loom.com/share/..."
+                      className="form-control"
+                    />
+                  </div>
                 </div>
               </section>
             )}
@@ -1494,57 +1680,163 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                       className="form-control"
                     />
                   </div>
+
+                  <div>
+                    <label htmlFor="cand-cnh" className="form-label">
+                      Carteira de Habilitação (CNH)
+                    </label>
+                    <select
+                      id="cand-cnh"
+                      value={formData.cnhCategory}
+                      onChange={(e) =>
+                        setFormData({ ...formData, cnhCategory: e.target.value as CnhCategory })
+                      }
+                      className="form-control cursor-pointer"
+                    >
+                      <option value="nao">Não possuo CNH</option>
+                      <option value="A">CNH A (Moto)</option>
+                      <option value="B">CNH B (Carro)</option>
+                      <option value="AB">CNH AB (Moto e Carro)</option>
+                      <option value="C">CNH C</option>
+                      <option value="D">CNH D</option>
+                      <option value="E">CNH E</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label htmlFor="cand-vehicle" className="form-label">
+                      Veículo próprio
+                    </label>
+                    <select
+                      id="cand-vehicle"
+                      value={formData.ownVehicle}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          ownVehicle: e.target.value as VehicleRequirement,
+                        })
+                      }
+                      className="form-control cursor-pointer"
+                    >
+                      <option value="nao">Não possuo veículo próprio</option>
+                      <option value="moto">Possuo Moto própria</option>
+                      <option value="carro">Possuo Carro próprio</option>
+                    </select>
+                  </div>
                 </div>
               </section>
             )}
 
-            {/* PASSO 4: REVISÃO E CURRÍCULO EM PDF */}
+            {/* PASSO 4: REVISÃO, PREVIEW ATS E CURRÍCULO EM PDF */}
             {wizardStep === 4 && (
               <section
                 id="resume-step-4"
                 className="bg-white border border-[#E2E8F0] rounded-xl p-5 sm:p-6 space-y-5"
               >
-                <div className="pb-3 border-b border-[#F1F5F9]">
-                  <h3 className="text-[16px] font-semibold text-[#0F172A]">
-                    4. Revisão e Currículo em PDF
-                  </h3>
-                  <p className="text-[12px] text-[#64748B] mt-0.5">
-                    Confira o resumo das suas informações, gere seu PDF no padrão ATS ou anexe um arquivo existente.
-                  </p>
+                <div className="pb-3 border-b border-[#F1F5F9] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-[16px] font-semibold text-[#0F172A]">
+                      4. Preview do Currículo ATS e Exportação em PDF
+                    </h3>
+                    <p className="text-[12px] text-[#64748B] mt-0.5">
+                      Visualize seu currículo formatado abaixo, imprima/baixe em PDF ou gere 3 modelos ATS otimizados.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="btn-base btn-sm btn-secondary inline-flex items-center gap-1.5 shrink-0"
+                  >
+                    <Printer className="w-4 h-4 text-[#2563EB]" />
+                    <span>Baixar / Imprimir em PDF</span>
+                  </button>
                 </div>
 
-                {/* Resumo Limpo em 3 Colunas */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-[#F8FAFC] p-4 rounded-lg border border-[#E2E8F0] text-xs">
-                  <div className="space-y-1">
-                    <span className="font-semibold text-[#64748B] block">
-                      Dados Principais
-                    </span>
-                    <p className="font-bold text-[#0F172A] text-sm">{formData.name || 'Não informado'}</p>
-                    <p className="text-[#334155]">{formData.role || 'Cargo não definido'}</p>
-                    <p className="text-[#64748B]">{formData.city}</p>
+                {/* Preview Limpo do Currículo ATS na Tela (Formatado para @media print) */}
+                <div
+                  id="ats-printable-resume"
+                  className="bg-white border border-[#CBD5E1] rounded-xl p-6 sm:p-8 shadow-xs space-y-4 text-[#0F172A]"
+                >
+                  <div className="border-b-2 border-[#1E40AF] pb-3">
+                    <h4 className="text-[20px] font-extrabold text-[#0F172A] tracking-tight">
+                      {formData.name || user.name || 'Seu Nome Completo'}
+                    </h4>
+                    <p className="text-[14px] font-semibold text-[#1E40AF] mt-0.5">
+                      {formData.role || 'Profissional em busca de oportunidades'}
+                      {formData.experienceLevel ? ` · Nível ${formData.experienceLevel}` : ''}
+                    </p>
+                    <p className="text-[12px] text-[#475569] mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span>{formData.city || 'Presidente Prudente, SP'}</span>
+                      {formData.phone && <span>· {formData.phone}</span>}
+                      {user.email && <span>· {user.email}</span>}
+                      {formData.cnhCategory && formData.cnhCategory !== 'nao' && (
+                        <span>· CNH {formData.cnhCategory}</span>
+                      )}
+                      {formData.ownVehicle && formData.ownVehicle !== 'nao' && (
+                        <span>
+                          · Veículo próprio ({formData.ownVehicle === 'moto' ? 'Moto' : 'Carro'})
+                        </span>
+                      )}
+                    </p>
                   </div>
-                  <div className="space-y-1">
-                    <span className="font-semibold text-[#64748B] block">
-                      Formação e Experiência
-                    </span>
-                    <p className="font-semibold text-[#0F172A]">
+
+                  {formData.about && (
+                    <div>
+                      <h5 className="text-[11px] font-bold uppercase tracking-wider text-[#1E40AF] mb-1">
+                        Resumo Profissional
+                      </h5>
+                      <p className="text-[13px] text-[#334155] leading-relaxed">
+                        {formData.about}
+                      </p>
+                    </div>
+                  )}
+
+                  {experiences.length > 0 && (
+                    <div>
+                      <h5 className="text-[11px] font-bold uppercase tracking-wider text-[#1E40AF] mb-2">
+                        Experiência Profissional
+                      </h5>
+                      <div className="space-y-2.5">
+                        {experiences.map((exp, idx) => (
+                          <div key={exp.id || idx} className="text-[13px]">
+                            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                              <strong className="font-bold text-[#0F172A]">
+                                {exp.role || 'Cargo'} — {exp.company || 'Empresa'}
+                              </strong>
+                              <span className="text-[12px] text-[#64748B]">{exp.period}</span>
+                            </div>
+                            {exp.description && (
+                              <p className="text-[#475569] mt-0.5 leading-snug">{exp.description}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <h5 className="text-[11px] font-bold uppercase tracking-wider text-[#1E40AF] mb-1">
+                      Formação Acadêmica
+                    </h5>
+                    <p className="text-[13px] font-semibold text-[#0F172A]">
                       {formData.education || 'Escolaridade não informada'}
                     </p>
-                    <p className="text-[#334155]">
-                      Nível: {formData.experienceLevel || 'Não informado'}
-                    </p>
-                    <p className="text-[#64748B] tabular-nums">
-                      {experiences.length} experiência(s) · {educationHistory.length} curso(s)
-                    </p>
+                    {educationHistory.map((edu, idx) => (
+                      <p key={edu.id || idx} className="text-[12px] text-[#475569] mt-0.5">
+                        {edu.degree} · {edu.institution}{' '}
+                        {edu.completionYear ? `(${edu.completionYear})` : ''}
+                      </p>
+                    ))}
                   </div>
-                  <div className="space-y-1">
-                    <span className="font-semibold text-[#64748B] block">
-                      Competências ({parsedSkillsList.length})
-                    </span>
-                    <p className="text-[#334155] leading-relaxed">
+
+                  <div>
+                    <h5 className="text-[11px] font-bold uppercase tracking-wider text-[#1E40AF] mb-1.5">
+                      Habilidades e Competências ({parsedSkillsList.length})
+                    </h5>
+                    <p className="text-[13px] text-[#334155] leading-relaxed">
                       {parsedSkillsList.length > 0
-                        ? parsedSkillsList.slice(0, 6).join(' · ')
-                        : 'Nenhuma competência informada'}
+                        ? parsedSkillsList.join(' · ')
+                        : 'Adicione suas competências na etapa 3 para exibir aqui.'}
                     </p>
                   </div>
                 </div>
@@ -1553,10 +1845,10 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                 <div className="p-5 rounded-xl bg-gradient-to-r from-[#1E40AF] to-[#2563EB] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="space-y-1">
                     <h4 className="text-[15px] font-bold text-white">
-                      Gerar Currículo em PDF Padrão ATS
+                      Gerar / Otimizar Currículo ATS ({RESUME_GENERATION_COST} cr)
                     </h4>
                     <p className="text-[13px] text-blue-100 leading-relaxed max-w-md">
-                      Escolha entre 3 modelos profissionais otimizados para recrutadores ({RESUME_GENERATION_COST} créditos).
+                      Escolha entre 3 modelos profissionais otimizados para recrutadores de Presidente Prudente ({RESUME_GENERATION_COST} créditos).
                     </p>
                   </div>
 
@@ -1567,7 +1859,7 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                     className="px-4 py-2.5 rounded-lg bg-white hover:bg-blue-50 text-[#1E40AF] font-bold text-[13px] transition-colors inline-flex items-center justify-center gap-2 cursor-pointer shrink-0 whitespace-nowrap"
                   >
                     <FileText className="w-4 h-4 text-[#2563EB]" />
-                    <span>Gerar PDF ATS ({RESUME_GENERATION_COST} créditos)</span>
+                    <span>Gerar / Otimizar Currículo ATS ({RESUME_GENERATION_COST} cr)</span>
                   </button>
                 </div>
 
@@ -1663,7 +1955,110 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
           </form>
         )}
 
-        {/* TAB 3: SAVED JOBS */}
+        {/* TAB 3: ALERTAS DE VAGAS */}
+        {activeTab === 'alerts' && (
+          <section className="bg-white border border-[#E2E8F0] rounded-xl p-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#F1F5F9]">
+              <div>
+                <h2 className="text-[18px] font-bold text-[#0F172A]">
+                  Alertas de Vagas em Presidente Prudente
+                </h2>
+                <p className="text-[13px] text-[#64748B] mt-0.5">
+                  Escolha as áreas de interesse e modalidades para receber avisos prioritários quando novas vagas forem publicadas.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2.5 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={jobAlertsEnabled}
+                  onChange={(e) => setJobAlertsEnabled(e.target.checked)}
+                  className="w-4 h-4 accent-[#1D4ED8] rounded cursor-pointer"
+                />
+                <span className="text-[13px] font-semibold text-[#0F172A]">
+                  {jobAlertsEnabled ? 'Alertas Ativos' : 'Alertas Pausados'}
+                </span>
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <span className="block text-[13px] font-semibold text-[#0F172A] mb-2">
+                  Áreas de interesse em Presidente Prudente e Região
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    'Administrativo',
+                    'Comércio',
+                    'Tecnologia',
+                    'Primeiro Emprego',
+                    'Financeiro',
+                    'Saúde',
+                    'Indústria',
+                    'Agronegócio',
+                    'Serviços',
+                  ].map((area) => {
+                    const selected = jobAlertAreas.includes(area);
+                    return (
+                      <button
+                        key={area}
+                        type="button"
+                        onClick={() => handleToggleAlertArea(area)}
+                        className={`px-3.5 py-2 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer ${
+                          selected
+                            ? 'bg-[#EFF6FF] border-[#2563EB] text-[#1E40AF] font-semibold'
+                            : 'bg-white border-[#E2E8F0] text-[#475569] hover:bg-[#F8FAFC]'
+                        }`}
+                      >
+                        {selected ? `✓ ${area}` : area}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <span className="block text-[13px] font-semibold text-[#0F172A] mb-2">
+                  Modalidades de trabalho desejadas
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {['Presencial', 'Híbrido', 'Remoto'].map((model) => {
+                    const selected = jobAlertWorkModels.includes(model);
+                    return (
+                      <button
+                        key={model}
+                        type="button"
+                        onClick={() => handleToggleAlertWorkModel(model)}
+                        className={`px-3.5 py-2 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer ${
+                          selected
+                            ? 'bg-[#EFF6FF] border-[#2563EB] text-[#1E40AF] font-semibold'
+                            : 'bg-white border-[#E2E8F0] text-[#475569] hover:bg-[#F8FAFC]'
+                        }`}
+                      >
+                        {selected ? `✓ ${model}` : model}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-[#F1F5F9] flex items-center justify-between gap-3">
+              <span className="text-[12px] text-[#64748B]">
+                E-mail cadastrado para alertas: <strong className="text-[#0F172A]">{user.email}</strong>
+              </span>
+              <button
+                type="button"
+                disabled={savingAlerts}
+                onClick={handleSaveJobAlerts}
+                className="btn-base btn-md btn-primary font-semibold"
+              >
+                {savingAlerts ? 'Salvando...' : 'Salvar preferências de alerta'}
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* TAB 4: SAVED JOBS */}
         {activeTab === 'saved' && (
           <section className="space-y-4">
             {savedJobsList.length === 0 ? (
