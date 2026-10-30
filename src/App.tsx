@@ -1,19 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase/config';
 import { Navbar } from './components/Navbar';
 import { HomeView } from './components/HomeView';
-import { CandidateDashboard } from './components/CandidateDashboard';
-import { CompanyDashboard } from './components/CompanyDashboard';
-import { AdminDashboard } from './components/AdminDashboard';
 import { AuthModal } from './components/AuthModal';
+import { CompleteOnboardingModal } from './components/CompleteOnboardingModal';
 import { JobDetailsModal } from './components/JobDetailsModal';
 import { ReportModal } from './components/ReportModal';
 import { LgpdModal } from './components/LgpdModal';
-import { PlansView } from './components/PlansView';
 import { MercadoPagoModal } from './components/MercadoPagoModal';
 import { CreditLockModal } from './components/CreditLockModal';
 import { Toast } from './components/Toast';
+
+const CandidateDashboard = React.lazy(() =>
+  import('./components/CandidateDashboard').then((m) => ({ default: m.CandidateDashboard }))
+);
+const CompanyDashboard = React.lazy(() =>
+  import('./components/CompanyDashboard').then((m) => ({ default: m.CompanyDashboard }))
+);
+const AdminDashboard = React.lazy(() =>
+  import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard }))
+);
+const PlansView = React.lazy(() =>
+  import('./components/PlansView').then((m) => ({ default: m.PlansView }))
+);
 import {
   subscribeJobs,
   createJob,
@@ -504,6 +514,11 @@ export default function App() {
     screeningAnswers?: Record<string, 'sim' | 'nao'>
   ) => {
     if (!currentUser) {
+      try {
+        sessionStorage.setItem('pendingJobId', job.id);
+      } catch {
+        // ignore
+      }
       setPendingJobForApply(job);
       setAuthModalRole('candidate');
       setAuthModalMode('login');
@@ -762,105 +777,113 @@ export default function App() {
           />
         )}
 
-        {currentView === 'candidate' && currentUser && (
-          <CandidateDashboard
-            user={currentUser}
-            jobs={jobs}
-            applications={applications}
-            onUpdateProfile={handleUpdateProfile}
-            onWithdrawApplication={handleWithdrawApplication}
-            onSelectCreditPackage={(pkg) => {
-              setSelectedPlanForCheckout(null);
-              setSelectedCreditPackageForCheckout(pkg);
-            }}
-            onCreditsUpdated={(newBalance) => {
-              setCurrentUser((prev) => (prev ? { ...prev, credits: newBalance } : null));
-            }}
-            onRequireCredits={openCreditLockAlert}
-            showToast={showToast}
-            onNavigate={navigateTo}
-            onViewJobDetails={(job) => setSelectedJobForDetails(job)}
-            onToggleSaveJob={handleToggleSaveJob}
-            activeSubTab={candidateSubTab}
-            onSubTabChange={setCandidateSubTab}
-          />
-        )}
+        <Suspense
+          fallback={
+            <div className="p-10 text-center text-slate-500 text-sm font-medium">
+              Carregando módulo...
+            </div>
+          }
+        >
+          {currentView === 'candidate' && currentUser && (
+            <CandidateDashboard
+              user={currentUser}
+              jobs={jobs}
+              applications={applications}
+              onUpdateProfile={handleUpdateProfile}
+              onWithdrawApplication={handleWithdrawApplication}
+              onSelectCreditPackage={(pkg) => {
+                setSelectedPlanForCheckout(null);
+                setSelectedCreditPackageForCheckout(pkg);
+              }}
+              onCreditsUpdated={(newBalance) => {
+                setCurrentUser((prev) => (prev ? { ...prev, credits: newBalance } : null));
+              }}
+              onRequireCredits={openCreditLockAlert}
+              showToast={showToast}
+              onNavigate={navigateTo}
+              onViewJobDetails={(job) => setSelectedJobForDetails(job)}
+              onToggleSaveJob={handleToggleSaveJob}
+              activeSubTab={candidateSubTab}
+              onSubTabChange={setCandidateSubTab}
+            />
+          )}
 
-        {currentView === 'company' && currentUser && (
-          <CompanyDashboard
-            user={currentUser}
-            jobs={jobs}
-            applications={applications}
-            onUpdateProfile={handleUpdateProfile}
-            onPostJob={handlePostCompanyJob}
-            onBoostJob={handleBoostCompanyJob}
-            onUpdateJob={async (jobId, updates) => {
-              await updateJob(jobId, updates);
-            }}
-            onDeleteJob={async (jobId) => {
-              await deleteJob(jobId);
-              showToast('Vaga excluída com sucesso.');
-            }}
-            onUpdateAppStatus={async (appId, newStatus, notes, viewedAt) => {
-              await updateApplicationStatus(appId, newStatus, notes, viewedAt);
-            }}
-            onSelectCreditPackage={(pkg) => {
-              setSelectedPlanForCheckout(null);
-              setSelectedCreditPackageForCheckout(pkg);
-            }}
-            onCreditsUpdated={(newBalance) => {
-              setCurrentUser((prev) => (prev ? { ...prev, credits: newBalance } : null));
-            }}
-            showToast={showToast}
-            onNavigate={navigateTo}
-            activeSubTab={companySubTab}
-            onSubTabChange={setCompanySubTab}
-          />
-        )}
+          {currentView === 'company' && currentUser && (
+            <CompanyDashboard
+              user={currentUser}
+              jobs={jobs}
+              applications={applications}
+              onUpdateProfile={handleUpdateProfile}
+              onPostJob={handlePostCompanyJob}
+              onBoostJob={handleBoostCompanyJob}
+              onUpdateJob={async (jobId, updates) => {
+                await updateJob(jobId, updates);
+              }}
+              onDeleteJob={async (jobId) => {
+                await deleteJob(jobId);
+                showToast('Vaga excluída com sucesso.');
+              }}
+              onUpdateAppStatus={async (appId, newStatus, notes, viewedAt) => {
+                await updateApplicationStatus(appId, newStatus, notes, viewedAt);
+              }}
+              onSelectCreditPackage={(pkg) => {
+                setSelectedPlanForCheckout(null);
+                setSelectedCreditPackageForCheckout(pkg);
+              }}
+              onCreditsUpdated={(newBalance) => {
+                setCurrentUser((prev) => (prev ? { ...prev, credits: newBalance } : null));
+              }}
+              showToast={showToast}
+              onNavigate={navigateTo}
+              activeSubTab={companySubTab}
+              onSubTabChange={setCompanySubTab}
+            />
+          )}
 
-        {currentView === 'plans' && (
-          <PlansView
-            currentUser={currentUser}
-            initialRole={currentUser && isCompany(currentUser) ? 'company' : 'candidate'}
-            onSelectPlan={(plan, period) => {
-              setSelectedCreditPackageForCheckout(null);
-              setSelectedPlanForCheckout({ plan, period });
-            }}
-            onSelectCreditPackage={(pkg) => {
-              setSelectedPlanForCheckout(null);
-              setSelectedCreditPackageForCheckout(pkg);
-            }}
-            onCreditsUpdated={(newBalance) => {
-              setCurrentUser((prev) => (prev ? { ...prev, credits: newBalance } : null));
-            }}
-            showToast={showToast}
-            onNavigate={navigateTo}
-            onOpenAuth={(type, mode) => {
-              setAuthModalRole(type || 'candidate');
-              setAuthModalMode(mode || 'register');
-              setIsAuthModalOpen(true);
-            }}
-          />
-        )}
+          {currentView === 'plans' && (
+            <PlansView
+              currentUser={currentUser}
+              initialRole={currentUser && isCompany(currentUser) ? 'company' : 'candidate'}
+              onSelectPlan={(plan, period) => {
+                setSelectedCreditPackageForCheckout(null);
+                setSelectedPlanForCheckout({ plan, period });
+              }}
+              onSelectCreditPackage={(pkg) => {
+                setSelectedPlanForCheckout(null);
+                setSelectedCreditPackageForCheckout(pkg);
+              }}
+              onCreditsUpdated={(newBalance) => {
+                setCurrentUser((prev) => (prev ? { ...prev, credits: newBalance } : null));
+              }}
+              showToast={showToast}
+              onNavigate={navigateTo}
+              onOpenAuth={(type, mode) => {
+                setAuthModalRole(type || 'candidate');
+                setAuthModalMode(mode || 'register');
+                setIsAuthModalOpen(true);
+              }}
+            />
+          )}
 
-        {currentView === 'admin' && isAdmin && currentUser && (
-          <AdminDashboard
-            currentUser={currentUser}
-            jobs={jobs}
-            onPostJob={async (jobData) => {
-              await createJob(jobData);
-            }}
-            onUpdateJob={async (jobId, updates) => {
-              await updateJob(jobId, updates);
-              showToast('Vaga atualizada pelo Administrador.');
-            }}
-            onDeleteJob={async (jobId) => {
-              await deleteJob(jobId);
-              showToast('Vaga excluída pelo Administrador.');
-            }}
-            showToast={showToast}
-          />
-        )}
+          {currentView === 'admin' && isAdmin && currentUser && (
+            <AdminDashboard
+              currentUser={currentUser}
+              jobs={jobs}
+              onPostJob={async (jobData) => {
+                await createJob(jobData);
+              }}
+              onUpdateJob={async (jobId, updates) => {
+                await updateJob(jobId, updates);
+                showToast('Vaga atualizada pelo Administrador.');
+              }}
+              onDeleteJob={async (jobId) => {
+                await deleteJob(jobId);
+                showToast('Vaga excluída pelo Administrador.');
+              }}
+              showToast={showToast}
+            />
+          )}
+        </Suspense>
       </div>
 
       {/* Global Modals */}
@@ -874,8 +897,19 @@ export default function App() {
           if (profile.type === 'admin') {
             setIsAdmin(true);
           }
-          if (pendingJobForApply && isCandidate(profile)) {
-            setSelectedJobForDetails(pendingJobForApply);
+          let storedPendingId: string | null = null;
+          try {
+            storedPendingId = sessionStorage.getItem('pendingJobId');
+            if (storedPendingId) sessionStorage.removeItem('pendingJobId');
+          } catch {
+            // ignore
+          }
+          const resolvedPendingJob =
+            pendingJobForApply ||
+            (storedPendingId ? jobs.find((j) => j.id === storedPendingId) || null : null);
+
+          if (resolvedPendingJob && isCandidate(profile)) {
+            setSelectedJobForDetails(resolvedPendingJob);
             setPendingJobForApply(null);
             return;
           }
@@ -889,6 +923,23 @@ export default function App() {
         }}
         showToast={showToast}
       />
+
+      {currentUser &&
+        currentUser.onboardingCompleted === false &&
+        !currentUser.cpf &&
+        !currentUser.cnpj &&
+        !currentUser.documentNumber && (
+          <CompleteOnboardingModal
+            userName={currentUser.name}
+            userEmail={currentUser.email}
+            onCompleted={async () => {
+              const refreshed = await getUserProfile(currentUser.uid);
+              if (refreshed) {
+                setCurrentUser(refreshed);
+              }
+            }}
+          />
+        )}
 
       <JobDetailsModal
         job={selectedJobForDetails}

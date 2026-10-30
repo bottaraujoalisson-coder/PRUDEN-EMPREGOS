@@ -325,7 +325,7 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
   const [submittingJob, setSubmittingJob] = useState(false);
   const [optimizingWithAi, setOptimizingWithAi] = useState(false);
 
-  const JOB_DRAFT_STORAGE_KEY = `pruden_job_wizard_draft_v1_${user.uid}`;
+  const JOB_DRAFT_STORAGE_KEY = `pruden_job_draft_${user.uid}`;
 
   // Restaura rascunho automático da vaga ao abrir o painel (quando não está editando vaga existente)
   useEffect(() => {
@@ -1401,34 +1401,34 @@ export const CompanyDashboard: React.FC<CompanyDashboardProps> = ({
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                               <div className="bg-white p-2.5 rounded-lg border border-slate-200">
                                 <span className="text-slate-500 block">
-                                  Habilidades Técnicas (45%)
+                                  Habilidades (40 pts)
                                 </span>
                                 <span className="font-extrabold text-slate-900 text-sm tabular-nums">
-                                  {app.matchBreakdown.skillsScore}%
+                                  {app.matchBreakdown.skillsScore}/40 pts
                                 </span>
                               </div>
                               <div className="bg-white p-2.5 rounded-lg border border-slate-200">
                                 <span className="text-slate-500 block">
-                                  Experiência (25%)
+                                  Experiência (25 pts)
                                 </span>
                                 <span className="font-extrabold text-slate-900 text-sm tabular-nums">
-                                  {app.matchBreakdown.experienceScore}%
+                                  {app.matchBreakdown.experienceScore}/25 pts
                                 </span>
                               </div>
                               <div className="bg-white p-2.5 rounded-lg border border-slate-200">
                                 <span className="text-slate-500 block">
-                                  Formação (15%)
+                                  Palavras-chave (20 pts)
                                 </span>
                                 <span className="font-extrabold text-slate-900 text-sm tabular-nums">
-                                  {app.matchBreakdown.educationScore}%
+                                  {app.matchBreakdown.keywordsScore ?? app.matchBreakdown.educationScore}/20 pts
                                 </span>
                               </div>
                               <div className="bg-white p-2.5 rounded-lg border border-slate-200">
                                 <span className="text-slate-500 block">
-                                  Localização/Modelo (15%)
+                                  Localização (15 pts)
                                 </span>
                                 <span className="font-extrabold text-slate-900 text-sm tabular-nums">
-                                  {app.matchBreakdown.locationScore}%
+                                  {app.matchBreakdown.locationScore}/15 pts
                                 </span>
                               </div>
                             </div>

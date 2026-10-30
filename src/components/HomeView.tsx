@@ -21,6 +21,7 @@ import {
 } from '../utils/matchAlgorithm';
 import { APPLY_JOB_CREDIT_COST } from '../utils/creditsData';
 import { EXPANDED_JOB_CATEGORIES, CONTRACT_FILTER_PILLS } from '../constants/credits';
+import { formatSalaryBRL } from '../utils/formatters';
 
 interface HomeViewProps {
   jobs: Job[];
@@ -107,7 +108,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const userIsCompany = isCompany(currentUser);
 
   const activeJobs = useMemo(() => {
-    return jobs.filter((job) => !job.status || job.status === 'active');
+    return jobs.filter(
+      (job) =>
+        (!job.status || job.status === 'active') &&
+        !/^empresa teste$/i.test(job.companyName || '') &&
+        job.isTestRecord !== true
+    );
   }, [jobs]);
 
   useEffect(() => {
@@ -329,7 +335,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     setFilterCnh('Todas');
     setFilterVehicle('Todos');
     setVisibleCount(12);
-    window.history.replaceState({}, '', window.location.pathname);
+    window.history.replaceState({}, '', '/');
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -376,7 +382,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         id="hero-section"
         className="bg-gradient-to-b from-[#1E40AF] to-[#2563EB] text-white border-b border-[#1D4ED8] scroll-mt-24"
       >
-        <div className="container-app pt-14 pb-10 md:pt-20 md:pb-12">
+        <div className="container-app pt-24 pb-10 md:pt-28 md:pb-12">
           <div className="max-w-2xl mb-6">
             <h1 className="text-[28px] sm:text-[34px] md:text-[38px] font-bold text-white leading-[1.18] tracking-[-0.03em] [text-wrap:balance]">
               Encontre sua próxima vaga em Presidente Prudente.
@@ -880,7 +886,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
               const isSaved = savedJobIds.includes(job.id);
               const isOwnCompanyJob =
                 userIsCompany && currentUser && job.companyId === currentUser.uid;
-              const formattedSalary = formatJobSalary(job);
+              const formattedSalary =
+                job.salaryMin && !job.salaryMax && !job.salaryRange
+                  ? formatSalaryBRL(job.salaryMin)
+                  : formatJobSalary(job);
               const canOneClickApply =
                 userIsCandidate &&
                 !isApplied &&

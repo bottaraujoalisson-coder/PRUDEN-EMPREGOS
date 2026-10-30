@@ -7,6 +7,10 @@ import {
   onSnapshot,
   query,
   orderBy,
+  limit,
+  startAfter,
+  getDocs,
+  QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { handleFirestoreError, OperationType } from '../firebase/errors';
@@ -15,6 +19,7 @@ import { stripUndefined } from '../utils/matchAlgorithm';
 
 const NOW_MS = Date.now();
 const PLUS_30_DAYS_ISO = new Date(NOW_MS + 30 * 24 * 60 * 60 * 1000).toISOString();
+export const JOBS_PAGE_SIZE = 24;
 
 export const INITIAL_PRUDENTE_DEMO_JOBS: Job[] = [
   {
@@ -183,12 +188,12 @@ export const INITIAL_PRUDENTE_DEMO_JOBS: Job[] = [
 ];
 
 function isLegacyTestJob(job: Partial<Job>, id: string): boolean {
-  if (id.startsWith('job-seed-')) return true;
-  const companyNorm = (job.companyName || '').trim().toLowerCase();
+  if (id.startsWith('job-seed-') || job.isTestRecord === true) return true;
+  const companyNorm = (job.companyName || '').trim();
   const titleNorm = (job.title || '').trim().toLowerCase();
   if (
-    companyNorm === 'empresa teste' ||
-    (companyNorm.includes('empresa teste') && titleNorm === 'programador')
+    /^empresa teste$/i.test(companyNorm) ||
+    (companyNorm.toLowerCase().includes('empresa teste') && titleNorm === 'programador')
   ) {
     return true;
   }
@@ -197,7 +202,7 @@ function isLegacyTestJob(job: Partial<Job>, id: string): boolean {
 
 export function subscribeJobs(callback: (jobs: Job[]) => void): () => void {
   const jobsRef = collection(db, 'jobs');
-  const q = query(jobsRef, orderBy('createdAt', 'desc'));
+  const q = query(jobsRef, orderBy('createdAt', 'desc'), limit(JOBS_PAGE_SIZE));
 
   return onSnapshot(
     q,
@@ -206,7 +211,6 @@ export function subscribeJobs(callback: (jobs: Job[]) => void): () => void {
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as Omit<Job, 'id'>;
         if (isLegacyTestJob(data, docSnap.id)) {
-          // Silently clean up legacy test job if permissions allow, and omit from UI
           deleteDoc(doc(db, 'jobs', docSnap.id)).catch(() => {});
           return;
         }
@@ -230,6 +234,27 @@ export function subscribeJobs(callback: (jobs: Job[]) => void): () => void {
       callback(INITIAL_PRUDENTE_DEMO_JOBS);
     }
   );
+}
+
+export async function fetchJobsPage(lastDoc?: QueryDocumentSnapshot): Promise<{
+  jobs: Job[];
+  lastVisible: QueryDocumentSnapshot | null;
+}> {
+  const jobsRef = collection(db, 'jobs');
+  const q = lastDoc
+    ? query(jobsRef, orderBy('createdAt', 'desc'), startAfter(lastDoc), limit(JOBS_PAGE_SIZE))
+    : query(jobsRef, orderBy('createdAt', 'desc'), limit(JOBS_PAGE_SIZE));
+
+  const snap = await getDocs(q);
+  const jobs: Job[] = [];
+  snap.docs.forEach((docSnap) => {
+    const data = docSnap.data() as Omit<Job, 'id'>;
+    if (!isLegacyTestJob(data, docSnap.id)) {
+      jobs.push({ id: docSnap.id, ...data });
+    }
+  });
+  const lastVisible = snap.docs.length > 0 ? snap.docs[snap.docs.length - 1] : null;
+  return { jobs, lastVisible };
 }
 
 export async function createJob(

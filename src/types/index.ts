@@ -121,6 +121,12 @@ export interface UserProfile {
   credits?: number;
   isVerified?: boolean;
   isVerifiedCompany?: boolean;
+  cnpjVerified?: boolean;
+  onboardingCompleted?: boolean;
+  lgpdConsent?: boolean;
+  lgpdConsentAt?: string;
+  companyName?: string;
+  plan?: string;
   welcomeCreditsGranted?: boolean;
   videoPitchUrl?: string;
 
@@ -212,6 +218,7 @@ export interface Job {
   screeningQuestions?: ScreeningQuestion[];
   companyVerified?: boolean;
   expiresAt?: string; // ISO Date (ex: +30 dias após criação)
+  isTestRecord?: boolean;
 }
 
 export type ApplicationStatus =
@@ -228,10 +235,11 @@ export type ApplicationStatus =
   | string;
 
 export interface MatchBreakdown {
-  skillsScore: number; // 0-100
-  experienceScore: number; // 0-100
+  skillsScore: number; // 0-40 ou 0-100
+  experienceScore: number; // 0-25 ou 0-100
+  keywordsScore?: number; // 0-20
   educationScore: number; // 0-100
-  locationScore: number; // 0-100
+  locationScore: number; // 0-15 ou 0-100
 }
 
 export interface Application {

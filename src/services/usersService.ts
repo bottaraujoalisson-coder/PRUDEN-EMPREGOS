@@ -7,6 +7,7 @@ import {
   collection,
   getDocs,
   runTransaction,
+  writeBatch,
 } from 'firebase/firestore';
 import { db, auth } from '../firebase/config';
 import { getActiveSessionUid } from './directCloudAuth';
@@ -217,7 +218,28 @@ export async function saveUserProfile(
 
   try {
     const userRef = doc(db, 'users', uid);
+    const publicProfileRef = doc(db, 'profiles', uid);
     const privateRef = doc(db, 'private_profiles', uid);
+
+    const buildPublicShowcasePayload = (src: Partial<UserProfile>) =>
+      stripUndefined({
+        uid,
+        name: src.name,
+        displayName: src.name,
+        role: src.role || (src.type === 'company' ? 'company' : 'candidate'),
+        city: src.city || 'Presidente Prudente, SP',
+        state: src.state || 'SP',
+        bio: src.about || '',
+        desiredRole: src.role || '',
+        skills: src.skills || [],
+        experiences: src.experiences || [],
+        education: src.education || '',
+        companyName: src.type === 'company' ? src.name : undefined,
+        tradeName: src.nomeFantasia || undefined,
+        publicEmail: src.email || '',
+        isVerifiedCompany: false,
+        updatedAt: now,
+      });
 
     const buildPrivatePayload = (src: Partial<UserProfile>) =>
       stripUndefined({
@@ -225,9 +247,11 @@ export async function saveUserProfile(
         documentType: docType || src.documentType,
         documentNumber: formattedDoc || src.documentNumber,
         normalizedDocument: normalizedDoc || src.normalizedDocument,
+        document: normalizedDoc || src.normalizedDocument,
         cpf: docType === 'CPF' ? formattedDoc : src.cpf,
         cnpj: docType === 'CNPJ' ? formattedDoc : src.cnpj,
         privatePhone: src.phone,
+        whatsapp: src.phone,
         phone: src.phone,
         cep: src.cep,
         street: src.street,
@@ -352,10 +376,18 @@ export async function saveUserProfile(
           }
         }
       });
+      const batch = writeBatch(db);
+      batch.set(publicProfileRef, buildPublicShowcasePayload(profile), { merge: true });
+      batch.set(privateRef, buildPrivatePayload(profile), { merge: true });
+      await batch.commit().catch(() => {});
       return;
     }
 
-    await setDoc(privateRef, buildPrivatePayload(profile), { merge: true }).catch(() => {});
+    const batch = writeBatch(db);
+    batch.set(publicProfileRef, buildPublicShowcasePayload(profile), { merge: true });
+    batch.set(privateRef, buildPrivatePayload(profile), { merge: true });
+    await batch.commit().catch(() => {});
+
     const existingSnap = await getDoc(userRef);
     if (existingSnap.exists()) {
       const payload = stripUndefined({
@@ -607,14 +639,20 @@ export async function consumeUserCredits(
 
   let data: any = {};
   try {
+    const idToken = auth.currentUser ? await auth.currentUser.getIdToken().catch(() => '') : '';
     const res = await fetch('/api/credits/consume', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+      },
       body: JSON.stringify({
         userId: user.uid,
         actionType: resolvedAction,
+        action: resolvedAction,
         currentClientCredits: currentCredits,
         referenceId: resolvedRefId,
+        targetId: resolvedRefId,
         description: options.description,
         idempotencyKey: options.idempotencyKey,
       }),
@@ -819,3 +857,100 @@ export async function clearAllDatabaseData(keepAdminUid?: string): Promise<{
 
   return { jobsDeleted, applicationsDeleted, reportsDeleted, usersDeleted };
 }
+
+export async function completeUserOnboarding(payload: {
+  uid?: string;
+  email?: string;
+  role: 'candidate' | 'company';
+  document: string;
+  name: string;
+  phone: string;
+  city: string;
+  lgpdAccepted?: boolean;
+  razaoSocial?: string;
+  nomeFantasia?: string;
+  cep?: string;
+  fiscalAddress?: {
+    cep?: string;
+    street?: string;
+    number?: string;
+    neighborhood?: string;
+    city?: string;
+    state?: string;
+  };
+}): Promise<{
+  success: boolean;
+  credits?: number;
+  role?: 'candidate' | 'company';
+  isVerifiedCompany?: boolean;
+  welcomeCreditsGranted?: boolean;
+  profile: UserProfile;
+}> {
+  const currentUser = auth.currentUser;
+  const uid = payload.uid || currentUser?.uid || getActiveSessionUid();
+  if (!uid) {
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
+
+  const token = currentUser ? await currentUser.getIdToken().catch(() => '') : '';
+  const response = await fetch('/api/auth/complete-onboarding', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      uid,
+      email: payload.email || currentUser?.email || '',
+      ...payload,
+      lgpdAccepted: payload.lgpdAccepted ?? true,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || 'Não foi possível validar o documento.');
+  }
+
+  const cleanDoc = payload.document.replace(/\D/g, '');
+  const now = new Date().toISOString();
+  const profileData: UserProfile = {
+    uid,
+    email: payload.email || currentUser?.email || '',
+    name: payload.name,
+    type: payload.role,
+    role: payload.role,
+    phone: payload.phone,
+    city: payload.city || 'Presidente Prudente, SP',
+    cep: payload.fiscalAddress?.cep || payload.cep || '19010-000',
+    street: payload.fiscalAddress?.street,
+    addressNumber: payload.fiscalAddress?.number,
+    neighborhood: payload.fiscalAddress?.neighborhood,
+    cpf: payload.role === 'candidate' ? cleanDoc : undefined,
+    cnpj: payload.role === 'company' ? cleanDoc : undefined,
+    documentType: payload.role === 'company' ? 'CNPJ' : 'CPF',
+    documentNumber: cleanDoc,
+    companyName: payload.nomeFantasia || payload.razaoSocial || payload.name,
+    razaoSocial: payload.razaoSocial,
+    nomeFantasia: payload.nomeFantasia,
+    cnpjVerified: payload.role === 'company',
+    isVerifiedCompany: payload.role === 'company',
+    onboardingCompleted: true,
+    lgpdConsent: true,
+    lgpdConsentAt: now,
+    welcomeCreditsGranted: true,
+    credits: data.credits ?? 30,
+    plan: 'free',
+    updatedAt: now,
+  };
+
+  await saveUserProfile(uid, profileData);
+
+  return {
+    ...data,
+    success: true,
+    welcomeCreditsGranted: data.welcomeCreditsGranted ?? true,
+    profile: profileData,
+  };
+}
+

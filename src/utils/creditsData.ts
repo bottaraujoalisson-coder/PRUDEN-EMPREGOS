@@ -14,6 +14,7 @@ import {
   OFFICIAL_CREDIT_PACKAGES,
   CreditPackage,
 } from '../constants/credits';
+import { CREDIT_PACKAGES as SHARED_CREDIT_PACKAGES } from '../shared/creditPackages';
 
 export {
   INITIAL_WELCOME_CREDITS,
@@ -57,11 +58,9 @@ export const CANDIDATE_RESUME_CREDIT_PACKAGE: CreditPackage =
   OFFICIAL_CREDIT_PACKAGES.pack_resume_15;
 
 export function getCreditPackageById(packageId: string): CreditPackage | undefined {
-  return OFFICIAL_CREDIT_PACKAGES[packageId];
+  return OFFICIAL_CREDIT_PACKAGES[packageId] || (SHARED_CREDIT_PACKAGES[packageId] as any);
 }
 
 export function formatCreditPackagePrice(pkg: CreditPackage): string {
   return formatPriceBRL(pkg.price);
 }
-
-

@@ -18,6 +18,7 @@ import {
   isCompany,
 } from '../utils/matchAlgorithm';
 import { APPLY_JOB_CREDIT_COST } from '../utils/creditsData';
+import { formatSalaryBRL } from '../utils/formatters';
 
 interface JobDetailsModalProps {
   job: Job | null;
@@ -112,6 +113,27 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
     return JSON.stringify(schema);
   }, [job]);
 
+  useEffect(() => {
+    if (!job || !jobPostingJsonLd) return;
+    const prevTitle = document.title;
+    document.title = `${job.title} em ${job.location || 'Presidente Prudente'} | Pruden Empregos`;
+
+    const existing = document.getElementById('job-posting-jsonld');
+    if (existing) existing.remove();
+
+    const script = document.createElement('script');
+    script.id = 'job-posting-jsonld';
+    script.type = 'application/ld+json';
+    script.text = jobPostingJsonLd;
+    document.head.appendChild(script);
+
+    return () => {
+      document.title = prevTitle;
+      const el = document.getElementById('job-posting-jsonld');
+      if (el) el.remove();
+    };
+  }, [job, jobPostingJsonLd]);
+
   if (!job) return null;
 
   const userIsCandidate = isCandidate(currentUser);
@@ -121,7 +143,10 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
 
   const screeningQuestions = job.screeningQuestions ?? [];
   const benefits = job.benefits ?? [];
-  const formattedSalary = formatJobSalary(job);
+  const formattedSalary =
+    job.salaryMin && !job.salaryMax && !job.salaryRange
+      ? formatSalaryBRL(job.salaryMin)
+      : formatJobSalary(job);
   const daysLeft = getDaysUntilExpiration(job);
   const isFirstJobFriendly =
     Boolean(job.acceptsFirstJob) || job.experience === 'Primeiro Emprego';
@@ -134,22 +159,28 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
       : null;
 
   const handleShare = () => {
+    const shareUrl = `${window.location.origin}/?vaga=${job.id}`;
     if (navigator.share) {
       navigator
         .share({
           title: `${job.title} - ${job.companyName}`,
           text: `Vaga de ${job.title} em ${job.location || 'Presidente Prudente'} no PrudenEmpregos`,
-          url: window.location.href,
+          url: shareUrl,
         })
         .catch(() => {});
     } else {
-      navigator.clipboard.writeText(window.location.href);
-      showToast('Link da vaga copiado.');
+      navigator.clipboard.writeText(shareUrl);
+      showToast('Link da vaga copiado para a área de transferência!');
     }
   };
 
   const handleInitiateApply = () => {
     if (!currentUser) {
+      try {
+        sessionStorage.setItem('pendingJobId', job.id);
+      } catch {
+        // ignore
+      }
       onClose();
       onApply(job);
       return;

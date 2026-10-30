@@ -293,7 +293,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       case 'auth/user-not-found':
       case 'auth/wrong-password':
       case 'auth/invalid-credential':
-        return 'E-mail ou senha incorretos.';
+        return 'E-mail ou senha inválidos. Verifique suas credenciais e tente novamente.';
       case 'auth/email-already-in-use':
         return 'Este e-mail já está cadastrado na plataforma. Clique em "Já tenho conta" para entrar.';
       case 'auth/weak-password':
@@ -316,7 +316,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (rawMessage && !rawMessage.startsWith('Firebase:')) {
           return rawMessage;
         }
-        return 'Não foi possível concluir o acesso. Verifique seus dados e tente novamente.';
+        return 'E-mail ou senha inválidos. Verifique suas credenciais e tente novamente.';
     }
   };
 
@@ -333,16 +333,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
       try {
         setLoading(true);
-        const resetRes = await smartResetPassword({
+        await smartResetPassword({
           email: email.trim(),
           document: documentInput.trim() || undefined,
           newPassword: password.trim() || undefined,
-        });
-        showToast(resetRes.message);
+        }).catch(() => {});
+        showToast(
+          'Se o e-mail informado estiver cadastrado, você receberá um link para redefinir sua senha em instantes.'
+        );
         setPassword('');
         setMode('login');
-      } catch (err: any) {
-        setErrorMsg(getTranslatedFirebaseError(err?.code || '', err?.message));
       } finally {
         setLoading(false);
       }

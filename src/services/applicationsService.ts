@@ -18,6 +18,7 @@ import {
   calculateScreeningCompatibility,
   stripUndefined,
 } from '../utils/matchAlgorithm';
+import { calculateDeterministicMatch } from '../utils/matchEngine';
 
 export function subscribeCandidateApplications(
   candidateId: string,
@@ -106,8 +107,24 @@ export async function applyToJob(
     throw new Error('Você já enviou sua candidatura para esta vaga anteriormente.');
   }
 
-  // Cálculo ponderado exclusivo na confirmação da candidatura
+  // Cálculo ponderado determinístico exclusivo na confirmação da candidatura (AUD-13: 40/25/20/15)
   const detailedAnalysis = calculateDetailedMatchAnalysis(job, candidate);
+  const deterministicMatch = calculateDeterministicMatch(
+    {
+      skills: candidate.skills || [],
+      experienceLevel: candidate.experienceLevel || 'Junior',
+      summary: `${candidate.role || ''} ${candidate.about || ''}`,
+      city: candidate.city || 'Presidente Prudente',
+    },
+    {
+      requiredSkills: job.skills || [],
+      experienceLevel: job.experience || 'Junior',
+      title: job.title,
+      description: job.description,
+      city: job.location || 'Presidente Prudente',
+      workModel: job.workModel,
+    }
+  );
 
   const questions = job.screeningQuestions ?? [];
   const hasScreening = questions.length > 0 && screeningAnswers !== undefined;
@@ -138,8 +155,14 @@ export async function applyToJob(
     jobTitle: job.title,
     companyName: job.companyName,
     jobLocation: job.location,
-    matchScore: detailedAnalysis.matchScore,
-    matchBreakdown: detailedAnalysis.matchBreakdown,
+    matchScore: deterministicMatch.totalScore,
+    matchBreakdown: {
+      skillsScore: deterministicMatch.skillsScore,
+      experienceScore: deterministicMatch.experienceScore,
+      keywordsScore: deterministicMatch.keywordsScore,
+      educationScore: detailedAnalysis.matchBreakdown.educationScore,
+      locationScore: deterministicMatch.locationScore,
+    },
     matchStrengths: detailedAnalysis.matchStrengths,
     matchWeaknesses: detailedAnalysis.matchWeaknesses,
     matchingSkills: detailedAnalysis.matchingSkills,

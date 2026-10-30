@@ -1,0 +1,1004 @@
+# SCRIPT MASTER DE ENGENHARIA E REFATORAÇÃO COMPLETA — PRUDEN EMPREGOS (PARA GOOGLE AI STUDIO)
+
+> **INSTRUÇÕES DE USO NO GOOGLE AI STUDIO:**
+> Copie todo o conteúdo abaixo e cole diretamente no chat de desenvolvimento do seu applet **PrudenEmpregos** no Google AI Studio. Este script contém todas as instruções arquiteturais, regras de negócio, trechos de código exatos e critérios de aceite necessários para corrigir os **20 achados da Auditoria Técnica (`AUD-01` a `AUD-20`)** de ponta a ponta, sem omitir nenhum arquivo ou funcionalidade.
+
+# PROMPT DE EXECUÇÃO PARA O AGENTE DO GOOGLE AI STUDIO
+
+Você é um Engenheiro de Software Sênior Full-Stack e Especialista em Segurança de Aplicações (AppSec). Sua missão é executar uma **refatoração completa, cirúrgica e definitiva** no projeto **PRUDEN EMPREGOS** (`https://prudenempregos.com.br/` / `https://prudenempregos.netlify.app/`), aplicando integralmente todas as **20 correções e melhorias da Auditoria Técnica (`AUD-01` a `AUD-20`)**.
+
+## REGRAS GERAIS DE EXECUÇÃO (OBRIGATÓRIAS)
+
+1. **Não quebre funcionalidades existentes:** Mantenha a identidade visual do Pruden Empregos (Tailwind CSS + Lucide Icons), aprimorando a usabilidade, responsividade e acessibilidade.
+2. **Aplique TODAS as etapas abaixo (Etapas 1 a 12):** Não deixe placeholders como `// TODO` ou `// implementar depois`. Escreva o código completo e funcional em cada arquivo listado.
+3. **Segurança Zero-Trust no Cliente:** Nenhuma operação sensível (concessão/dedução de créditos, promoção para `admin`, validação final de pagamento ou ativação de selo `isVerifiedCompany`) pode confiar exclusivamente no navegador.
+4. **Compatibilidade Híbrida (Google AI Studio + Netlify):** O backend Express (`server.ts`) deve funcionar tanto no container Node.js do Google AI Studio quanto em produção no Netlify via **Netlify Functions** (`netlify/functions/api.ts` + `netlify.toml`).
+
+## MAPA DE RASTREABILIDADE (AUDITORIA -> IMPLEMENTAÇÃO)
+
+| ID da Auditoria | Problema Identificado | Arquivo(s) Alvo nesta Refatoração | Etapa do Script |
+| :--- | :--- | :--- | :--- |
+| **AUD-01** | Bypass de autenticação no Firestore via `isDirectCloudUid()` (`usr_...`) | `firestore.rules`, `src/services/directCloudAuth.ts` | Etapas 1 e 2 |
+| **AUD-02** | Escalonamento de privilégios (`role`), saldo (`credits`) e status (`isVerifiedCompany`) via Mass Assignment | `firestore.rules`, `src/services/usersService.ts`, `server.ts` | Etapas 1, 3 e 4 |
+| **AUD-03** | Exposição pública de CPF, CNPJ, endereço fiscal e telefone privado em `/profiles` (Violação LGPD) | `firestore.rules`, `src/services/usersService.ts`, `src/types.ts` | Etapas 1 e 3 |
+| **AUD-04** | Permissão de escrita pelo cliente em `credit_orders` e `credit_transactions` | `firestore.rules`, `src/services/mercadopagoService.ts`, `server.ts` | Etapas 1 e 5 |
+| **AUD-05** | Controle de acesso granular em `applications`, `jobs`, `generated_resumes`, `documents` e `admins` | `firestore.rules` | Etapa 1 |
+| **AUD-06** | Autenticação paralela insegura (`directCloudAuth.ts`, `auth_accounts`, `auth_bridge`) e sessão em `localStorage` | `src/services/directCloudAuth.ts`, `src/components/AuthModal.tsx` | Etapa 2 |
+| **AUD-07** | Falta de coleta obrigatória de CPF/CNPJ pós-login Google (`smartSignInWithGoogle`) e abuso dos 30 créditos iniciais | `src/components/CompleteOnboardingModal.tsx`, `src/components/AuthModal.tsx`, `server.ts` | Etapas 2 e 4 |
+| **AUD-08** | Validação server-side de CNPJ ativo na Receita Federal (`BrasilAPI`) e prevenção de enumeração de contas | `src/services/cnpjService.ts`, `server.ts`, `src/components/AuthModal.tsx` | Etapas 2 e 4 |
+| **AUD-09** | Confirmação de pagamento PIX e concessão de créditos dependentes de `pollingTimer` e `confirmAndCreditOrder` no navegador | `src/components/MercadoPagoModal.tsx`, `src/services/mercadopagoService.ts`, `server.ts` | Etapa 5 |
+| **AUD-10** | Ausência de Webhook com validação `x-signature` (HMAC-SHA256), idempotência atômica e tabela fixa de preços no servidor | `src/shared/creditPackages.ts`, `server.ts` | Etapas 4 e 5 |
+| **AUD-11** | Inversão de preços em `PlansView.tsx` (10 cr > 15 cr) e dedução não-atômica de créditos em vagas/candidaturas/PDF | `src/shared/creditPackages.ts`, `src/components/PlansView.tsx`, `server.ts` | Etapas 4, 5 e 6 |
+| **AUD-12** | Ausência de sincronização de rotas na URL (`App.tsx`), quebrando o botão "Voltar" e links diretos de vagas | `src/App.tsx`, `src/components/HomeView.tsx`, `src/components/JobDetailsModal.tsx` | Etapa 7 |
+| **AUD-13** | Cálculo de Match exibido antes da candidatura em vez de pós-candidatura com pesos determinísticos (40/25/20/15) | `src/utils/matchEngine.ts`, `src/services/applicationsService.ts`, `src/components/HomeView.tsx`, `src/components/CompanyDashboard.tsx` | Etapa 8 |
+| **AUD-14** | Header sobrepondo Hero, salários sem formatação `R$`, vagas de teste em produção, "Limpar filtros" incompleto e perda de `pendingJobApplication` | `src/components/HomeView.tsx`, `src/components/JobDetailsModal.tsx`, `src/utils/formatters.ts` | Etapa 7 |
+| **AUD-15** | Ausência de Wizards em etapas com rascunho em `localStorage` e dos 3 modelos lineares de PDF ATS | `src/components/CandidateDashboard.tsx`, `src/components/CompanyDashboard.tsx`, `src/components/ResumeGeneratorModal.tsx` | Etapas 9 e 10 |
+| **AUD-16** | Endpoints `/api/ai/*` e `/api/mercadopago/*` sem middleware JWT (`requireAuth`), Rate Limiting e CORS restrito | `server.ts` | Etapa 4 |
+| **AUD-17** | Incompatibilidade entre `server.ts` (Express) e deploy estático no Netlify (`netlify.toml`) | `netlify/functions/api.ts`, `netlify.toml`, `server.ts` | Etapa 11 |
+| **AUD-18** | Higiene de configuração Firebase (`firebase-applet-config.json`, `.env.example`) e suporte a Firebase App Check | `src/firebase.ts`, `.env.example` | Etapa 11 |
+| **AUD-19** | Título `<title>Vite + React</title>` em produção, falta de Open Graph (`pt_BR`) e de Schema.org `JobPosting` (Google Jobs) | `index.html`, `src/components/JobDetailsModal.tsx`, `public/robots.txt` | Etapa 12 |
+| **AUD-20** | Ausência de `React.lazy`/`Suspense`, debounce de 300ms na busca, paginação no Firestore e testes de regras | `src/App.tsx`, `src/components/HomeView.tsx`, `src/services/jobsService.ts`, `tests/firestore.rules.test.ts` | Etapas 7 e 12 |
+
+## ETAPA 1: BLINDAGEM TOTAL DO `firestore.rules` (AUD-01, AUD-02, AUD-03, AUD-04, AUD-05)
+
+Substitua integralmente o arquivo `firestore.rules` pela implementação abaixo.
+**Mudanças críticas aplicadas:**
+1. Remoção completa de `isDirectCloudUid()` e de qualquer permissão baseada em prefixo `usr_` sem token JWT válido do Firebase Auth (`request.auth != null`).
+2. Bloqueio de coleções legadas inseguras (`auth_accounts` e `auth_bridge` com `allow read, write: if false;`).
+3. Proibição de alteração pelo cliente nos campos `credits`, `jobPostingCredits`, `role`, `plan`, `planExpiresAt`, `welcomeCreditsGranted`, `isVerifiedCompany` e `cnpjStatus` em `/users/{userId}` e `/profiles/{userId}`.
+4. Isolamento estrito de `/private_profiles/{userId}` (contendo `cpf`, `cnpj`, `document`, `fiscalAddress`, `privatePhone`, `birthDate`) para leitura e escrita apenas pelo titular (`isOwner(userId)`) ou `isAdmin()`.
+5. Bloqueio de `list` em `/documents/{docId}` e `/document_registry/{docId}` para impedir enumeração de CPFs/CNPJs cadastrados.
+6. Bloqueio de escrita pelo cliente em `/credit_orders/{orderId}`, `/credit_transactions/{txId}`, `/users/{userId}/creditTransactions/{txId}` e `/admins/{adminId}` (escritas permitidas exclusivamente via Firebase Admin SDK no `server.ts`).
+7. Restrição de leitura em `/applications/{applicationId}` exclusivamente ao candidato autor (`candidateId`), à empresa responsável pela vaga (`employerId`) ou a administradores (`isAdmin()`).
+
+### Arquivo: `firestore.rules`
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================================
+    // FUNÇÕES AUXILIARES DE AUTENTICAÇÃO E AUTORIZAÇÃO (ZERO-TRUST)
+    // =========================================================================
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isVerifiedCompanyUser() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'company' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerifiedCompany == true;
+    }
+
+    // Impede que o usuário manipule campos financeiros, de privilégio ou verificação
+    function hasNoPrivilegedFieldsOnCreate(data) {
+      return (!('role' in data) || data.role in ['candidate', 'company']) &&
+             (!('credits' in data) || data.credits == 0) &&
+             (!('jobPostingCredits' in data) || data.jobPostingCredits == 0) &&
+             (!('plan' in data) || data.plan == 'free') &&
+             (!('welcomeCreditsGranted' in data) || data.welcomeCreditsGranted == false) &&
+             (!('isVerifiedCompany' in data) || data.isVerifiedCompany == false);
+    }
+
+    function doesNotModifyProtectedUserFields() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'credits',
+        'jobPostingCredits',
+        'role',
+        'plan',
+        'planExpiresAt',
+        'welcomeCreditsGranted',
+        'isVerifiedCompany',
+        'cnpjStatus',
+        'documentVerified'
+      ]);
+    }
+
+    function doesNotContainSensitivePII(data) {
+      return !data.keys().hasAny([
+        'cpf',
+        'cnpj',
+        'document',
+        'fiscalAddress',
+        'privatePhone',
+        'birthDate',
+        'passwordHash',
+        'salt'
+      ]);
+    }
+
+    // =========================================================================
+    // BLOQUEIO DEFINITIVO DE COLEÇÕES DE FALLBACK LEGADAS (AUD-01 / AUD-06)
+    // =========================================================================
+    match /auth_accounts/{docId} {
+      allow read, write: if false;
+    }
+
+    match /auth_bridge/{docId} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // ADMINISTRADORES (AUD-05)
+    // =========================================================================
+    match /admins/{adminId} {
+      allow get: if isOwner(adminId) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false; // Gerenciado exclusivamente via Admin SDK / Console
+    }
+
+    // =========================================================================
+    // USUÁRIOS (AUD-02)
+    // =========================================================================
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) && hasNoPrivilegedFieldsOnCreate(request.resource.data);
+      allow update: if isAdmin() || (isOwner(userId) && doesNotModifyProtectedUserFields());
+      allow delete: if isAdmin();
+
+      match /creditTransactions/{txId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false; // Exclusivo via Admin SDK no server.ts
+      }
+    }
+
+    // =========================================================================
+    // PERFIS PÚBLICOS DE VITRINE (AUD-02 / AUD-03 - LGPD)
+    // =========================================================================
+    match /profiles/{userId} {
+      allow read: if true;
+      allow create: if isOwner(userId) &&
+                    doesNotContainSensitivePII(request.resource.data) &&
+                    (!('isVerifiedCompany' in request.resource.data) || request.resource.data.isVerifiedCompany == false);
+      allow update: if isAdmin() || (
+                    isOwner(userId) &&
+                    doesNotContainSensitivePII(request.resource.data) &&
+                    !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isVerifiedCompany', 'role', 'credits'])
+                  );
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // =========================================================================
+    // PERFIS PRIVADOS — DADOS SENSÍVEIS LGPD (AUD-03)
+    // Contém: cpf, cnpj, document, fiscalAddress, privatePhone, birthDate
+    // =========================================================================
+    match /private_profiles/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // REGISTRO DE UNICIDADE DE CPF/CNPJ (AUD-05 / AUD-07)
+    // =========================================================================
+    match /documents/{docId} {
+      allow get: if isAuthenticated();
+      allow list: if false; // Impede enumeração de CPFs/CNPJs
+      allow create: if isAuthenticated() &&
+                    !exists(/databases/$(database)/documents/documents/$(docId)) &&
+                    request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /document_registry/{docId} {
+      allow get: if isAuthenticated();
+      allow list: if false;
+      allow write: if false; // Escrita realizada exclusivamente pelo backend server.ts
+    }
+
+    // =========================================================================
+    // VAGAS DE EMPREGO (AUD-05)
+    // =========================================================================
+    match /jobs/{jobId} {
+      allow read: if true;
+      allow create: if isAdmin() || (
+                    isVerifiedCompanyUser() &&
+                    request.resource.data.companyId == request.auth.uid &&
+                    (!('isHighlighted' in request.resource.data) || request.resource.data.isHighlighted == false)
+                  );
+      allow update: if isAdmin() || (
+                    isAuthenticated() &&
+                    resource.data.companyId == request.auth.uid &&
+                    !request.resource.data.diff(resource.data).affectedKeys().hasAny(['companyId', 'isHighlighted', 'highlightedUntil'])
+                  );
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.companyId == request.auth.uid);
+    }
+
+    // =========================================================================
+    // CANDIDATURAS E MATCH (AUD-05 / AUD-13)
+    // =========================================================================
+    match /applications/{applicationId} {
+      allow get, list: if isAuthenticated() && (
+        resource.data.candidateId == request.auth.uid ||
+        resource.data.employerId == request.auth.uid ||
+        resource.data.companyId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() &&
+                    request.resource.data.candidateId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.employerId == request.auth.uid ||
+        resource.data.companyId == request.auth.uid ||
+        isAdmin()
+      ) && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'candidateId', 'jobId', 'matchScore', 'matchBreakdown'
+      ]);
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================================
+    // CURRÍCULOS GERADOS POR IA (AUD-05)
+    // =========================================================================
+    match /generated_resumes/{resumeId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // =========================================================================
+    // PEDIDOS E TRANSAÇÕES DE CRÉDITOS (AUD-04 / AUD-09 / AUD-10)
+    // =========================================================================
+    match /credit_orders/{orderId} {
+      allow get, list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if false; // Exclusivamente via Firebase Admin SDK no server.ts
+    }
+
+    match /credit_transactions/{txId} {
+      allow get, list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if false; // Exclusivamente via Firebase Admin SDK no server.ts
+    }
+  }
+}
+```
+
+## ETAPA 2: DESCONTINUAÇÃO DO `directCloudAuth.ts`, AUTENTICAÇÃO OFICIAL E ONBOARDING PÓS-GOOGLE (AUD-01, AUD-06, AUD-07, AUD-08)
+
+1. **Neutralize e remova qualquer uso de `src/services/directCloudAuth.ts`:**
+   - Substitua o conteúdo de `src/services/directCloudAuth.ts` por um módulo vazio ou deprecie-o para garantir que nenhum componente crie sessões falsas `usr_...` em `localStorage` ou consulte `auth_accounts` / `auth_bridge`.
+   - Toda autenticação deve utilizar exclusivamente o SDK oficial do Firebase Authentication (`signInWithEmailAndPassword`, `createUserWithEmailAndPassword`, `signInWithPopup` com `GoogleAuthProvider`, `sendPasswordResetEmail` e `onAuthStateChanged`).
+
+2. **Prevenção de Enumeração de Contas (`src/components/AuthModal.tsx`):**
+   - No login (`signInWithEmailAndPassword`), trate os códigos `auth/user-not-found`, `auth/wrong-password` e `auth/invalid-credential` exibindo sempre a mesma mensagem genérica: `"E-mail ou senha inválidos. Verifique suas credenciais e tente novamente."`
+   - Na recuperação de senha (`sendPasswordResetEmail`), exiba sempre: `"Se o e-mail informado estiver cadastrado, você receberá um link para redefinir sua senha em instantes."`
+
+3. **Crie o componente `src/components/CompleteOnboardingModal.tsx` (AUD-07):**
+   - Quando um usuário fizer login com o Google (`smartSignInWithGoogle`) pela primeira vez (ou quando seu documento em `/users/{uid}` não tiver `onboardingCompleted === true`), abra obrigatoriamente o `CompleteOnboardingModal`.
+   - Este modal deve solicitar:
+     - Tipo de conta: **Candidato** (`candidate`) ou **Empresa** (`company`).
+     - Se **Candidato**: CPF válido (com validação matemática dos dígitos verificadores Modulo 11), telefone/WhatsApp e cidade (padrão `"Presidente Prudente - SP"`).
+     - Se **Empresa**: CNPJ válido (14 dígitos), Razão Social/Nome Fantasia (preenchidos automaticamente via consulta `BrasilAPI` e validando `descricao_situacao_cadastral === "ATIVA"`), telefone comercial e endereço fiscal.
+   - Ao submeter o onboarding (ou o cadastro inicial por e-mail/senha), chame o endpoint autenticado `POST /api/auth/complete-onboarding` no `server.ts`, que fará a validação server-side do CPF/CNPJ, verificará a unicidade em `/documents/{normalizedDoc}` via `db.runTransaction` e concederá os **30 créditos iniciais gratuitos (`welcomeCreditsGranted: true`)** somente se o CPF/CNPJ nunca tiver recebido o bônus anteriormente.
+
+### Arquivo: `src/services/cnpjService.ts` (Validação Matemática de CPF/CNPJ + BrasilAPI)
+```typescript
+export interface CnpjVerificationResult {
+  valid: boolean;
+  active: boolean;
+  razaoSocial: string;
+  nomeFantasia: string;
+  situacaoCadastral: string;
+  logradouro: string;
+  numero: string;
+  bairro: string;
+  municipio: string;
+  uf: string;
+  cep: string;
+  error?: string;
+}
+
+export function normalizeDocument(doc: string): string {
+  return (doc || '').replace(/\D/g, '');
+}
+
+export function validateCPF(cpfInput: string): boolean {
+  const cpf = normalizeDocument(cpfInput);
+  if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
+
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(cpf.charAt(i), 10) * (10 - i);
+  }
+  let rev = 11 - (sum % 11);
+  if (rev === 10 || rev === 11) rev = 0;
+  if (rev !== parseInt(cpf.charAt(9), 10)) return false;
+
+  sum = 0;
+  for (let i = 0; i < 10; i++) {
+    sum += parseInt(cpf.charAt(i), 10) * (11 - i);
+  }
+  rev = 11 - (sum % 11);
+  if (rev === 10 || rev === 11) rev = 0;
+  return rev === parseInt(cpf.charAt(10), 10);
+}
+
+export function validateCNPJMath(cnpjInput: string): boolean {
+  const cnpj = normalizeDocument(cnpjInput);
+  if (cnpj.length !== 14 || /^(\d)\1{13}$/.test(cnpj)) return false;
+
+  const calcDigit = (base: string, weights: number[]) => {
+    const sum = base
+      .split('')
+      .reduce((acc, digit, idx) => acc + parseInt(digit, 10) * weights[idx], 0);
+    const remainder = sum % 11;
+    return remainder < 2 ? 0 : 11 - remainder;
+  };
+
+  const weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+  const weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+
+  const digit1 = calcDigit(cnpj.slice(0, 12), weights1);
+  const digit2 = calcDigit(cnpj.slice(0, 12) + digit1, weights2);
+
+  return cnpj.endsWith(`${digit1}${digit2}`);
+}
+
+export async function verifyCNPJWithReceita(cnpjInput: string): Promise<CnpjVerificationResult> {
+  const cnpj = normalizeDocument(cnpjInput);
+  if (!validateCNPJMath(cnpj)) {
+    return {
+      valid: false,
+      active: false,
+      razaoSocial: '',
+      nomeFantasia: '',
+      situacaoCadastral: 'INVÁLIDO',
+      logradouro: '',
+      numero: '',
+      bairro: '',
+      municipio: '',
+      uf: '',
+      cep: '',
+      error: 'CNPJ matematicamente inválido. Verifique os dígitos informados.'
+    };
+  }
+
+  try {
+    const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cnpj}`);
+    if (!response.ok) {
+      return {
+        valid: false,
+        active: false,
+        razaoSocial: '',
+        nomeFantasia: '',
+        situacaoCadastral: 'NÃO ENCONTRADO',
+        logradouro: '',
+        numero: '',
+        bairro: '',
+        municipio: '',
+        uf: '',
+        cep: '',
+        error: 'CNPJ não localizado na base da Receita Federal.'
+      };
+    }
+
+    const data = await response.json();
+    const situacao = String(data.descricao_situacao_cadastral || '').toUpperCase();
+    const isActive = situacao === 'ATIVA' || Number(data.codigo_situacao_cadastral) === 2;
+
+    return {
+      valid: true,
+      active: isActive,
+      razaoSocial: data.razao_social || '',
+      nomeFantasia: data.nome_fantasia || data.razao_social || '',
+      situacaoCadastral: situacao || (isActive ? 'ATIVA' : 'INATIVA'),
+      logradouro: data.logradouro || '',
+      numero: data.numero || '',
+      bairro: data.bairro || '',
+      municipio: data.municipio || 'Presidente Prudente',
+      uf: data.uf || 'SP',
+      cep: data.cep || '',
+      error: isActive ? undefined : `O CNPJ informado encontra-se com situação "${situacao}" na Receita Federal. Apenas empresas ATIVAS podem publicar vagas.`
+    };
+  } catch (err) {
+    return {
+      valid: false,
+      active: false,
+      razaoSocial: '',
+      nomeFantasia: '',
+      situacaoCadastral: 'ERRO DE CONSULTA',
+      logradouro: '',
+      numero: '',
+      bairro: '',
+      municipio: '',
+      uf: '',
+      cep: '',
+      error: 'Não foi possível validar o CNPJ no momento. Tente novamente em instantes.'
+    };
+  }
+}
+```
+
+## ETAPA 3: SEGREGAÇÃO DE DADOS SENSÍVEIS LGPD EM `/private_profiles` (AUD-03)
+
+Atualize `src/services/usersService.ts` para separar fisicamente os dados públicos de vitrine (`/profiles/{userId}`) dos dados pessoais/fiscais confidenciais (`/private_profiles/{userId}`):
+
+1. **Dados permitidos em `/profiles/{userId}` (Leitura Pública):**
+   - `uid`, `name`, `displayName`, `role`, `city`, `state`, `bio`, `desiredRole`, `skills`, `experiences` (sem documentos pessoais), `education`, `companyName`, `tradeName`, `industry`, `website`, `publicEmail`, `isVerifiedCompany`, `updatedAt`.
+2. **Dados exclusivos de `/private_profiles/{userId}` (Restrito ao Titular e Admin):**
+   - `cpf`, `cnpj`, `document`, `privatePhone`, `whatsapp`, `fiscalAddress`, `birthDate`, `updatedAt`.
+3. Crie uma função `saveUserProfile(uid, publicData, privateData)` que execute `writeBatch` no Firestore salvando simultaneamente os campos públicos em `doc(db, 'profiles', uid)` e os campos privados em `doc(db, 'private_profiles', uid)`.
+
+## ETAPA 4: TABELA ÚNICA DE PACOTES E CUSTOS DE CRÉDITOS (AUD-10, AUD-11)
+
+Crie o arquivo compartilhado `src/shared/creditPackages.ts` (importado tanto pelo frontend `PlansView.tsx` / `MercadoPagoModal.tsx` quanto pelo backend `server.ts`) para eliminar a inversão de preços (onde 10 créditos custavam R$ 29,90 e 15 créditos custavam R$ 19,90) e impedir manipulação de valores pelo navegador.
+
+### Arquivo: `src/shared/creditPackages.ts`
+```typescript
+export interface CreditPackage {
+  id: string;
+  name: string;
+  credits: number;
+  priceBRL: number;
+  pricePerCreditBRL: number;
+  badge?: string;
+  description: string;
+  popular?: boolean;
+}
+
+export const INITIAL_WELCOME_CREDITS = 30;
+
+export const CREDIT_COSTS = {
+  JOB_APPLICATION: 10,       // Candidatar-se a uma vaga
+  JOB_POSTING: 10,           // Publicar uma nova vaga
+  JOB_HIGHLIGHT: 15,         // Destacar vaga no topo da vitrine
+  RESUME_GENERATION_ATS: 15, // Gerar currículo otimizado com IA + PDF ATS
+} as const;
+
+export const CREDIT_PACKAGES: Record<string, CreditPackage> = {
+  pkg_10: {
+    id: 'pkg_10',
+    name: 'Pacote Básico (10 Créditos)',
+    credits: 10,
+    priceBRL: 14.90,
+    pricePerCreditBRL: 1.49,
+    description: 'Ideal para 1 candidatura ou 1 publicação de vaga avulsa.'
+  },
+  pkg_15: {
+    id: 'pkg_15',
+    name: 'Pacote Essencial (15 Créditos)',
+    credits: 15,
+    priceBRL: 19.90,
+    pricePerCreditBRL: 1.33,
+    badge: 'Ideal para Currículo IA',
+    description: 'Suficiente para gerar 1 Currículo PDF ATS com IA ou destacar 1 vaga.'
+  },
+  pkg_30: {
+    id: 'pkg_30',
+    name: 'Pacote Profissional (30 Créditos)',
+    credits: 30,
+    priceBRL: 34.90,
+    pricePerCreditBRL: 1.16,
+    badge: 'Mais Popular',
+    popular: true,
+    description: 'Excelente custo-benefício para até 3 candidaturas/vagas ou 2 currículos IA.'
+  },
+  pkg_50: {
+    id: 'pkg_50',
+    name: 'Pacote Avançado (50 Créditos)',
+    credits: 50,
+    priceBRL: 49.90,
+    pricePerCreditBRL: 1.00,
+    description: 'Para candidatos ativos ou empresas com múltiplas vagas abertas em Prudente.'
+  },
+  pkg_100: {
+    id: 'pkg_100',
+    name: 'Pacote Corporativo (100 Créditos)',
+    credits: 100,
+    priceBRL: 89.90,
+    pricePerCreditBRL: 0.90,
+    badge: 'Maior Economia (-40%)',
+    description: 'Pacote completo para recrutamento recorrente e múltiplos destaques.'
+  }
+};
+
+export const CREDIT_PACKAGE_LIST: CreditPackage[] = Object.values(CREDIT_PACKAGES);
+```
+
+## ETAPA 5: REFATORAÇÃO COMPLETA DO `server.ts` — SEGURANÇA, AUTH, TRANSAÇÕES ATÔMICAS E WEBHOOK MERCADO PAGO (AUD-02, AUD-04, AUD-07, AUD-08, AUD-09, AUD-10, AUD-11, AUD-16)
+
+Refatore o arquivo `server.ts` para incluir:
+1. **Inicialização do `firebase-admin`** (suportando credenciais via variável de ambiente `FIREBASE_SERVICE_ACCOUNT` ou Application Default Credentials).
+2. **Middleware `requireAuth`**: Valida o cabeçalho `Authorization: Bearer <token>` usando `admin.auth().verifyIdToken(token)` e injeta `req.authUser = decodedToken`. Nunca confie em `userId` enviado no `req.body`.
+3. **Rate Limiting e CORS**: Limite requisições por IP/UID em `/api/ai/*` (10 req/min) e `/api/mercadopago/*` (15 req/min) e restrinja CORS aos domínios autorizados (`https://prudenempregos.com.br`, `https://prudenempregos.netlify.app` e `localhost`).
+4. **Endpoint `POST /api/auth/complete-onboarding` (`requireAuth`)**:
+   - Recebe `{ role, document, name, phone, city, fiscalAddress }`.
+   - Se `role === 'company'`, consulta `https://brasilapi.com.br/api/cnpj/v1/{cnpj}` no servidor e verifica `descricao_situacao_cadastral === "ATIVA"`.
+   - Executa `db.runTransaction`: verifica se `/documents/{normalizedDoc}` já existe. Se não existir, cria `/documents/{normalizedDoc}`, concede `INITIAL_WELCOME_CREDITS` (30 créditos) em `/users/{uid}`, grava o extrato em `/credit_transactions` e separa os dados entre `/profiles/{uid}` e `/private_profiles/{uid}`.
+5. **Endpoints de Pagamento Mercado Pago (`/api/mercadopago/create-pix`, `/api/mercadopago/create-preference`, `/api/mercadopago/order-status/:orderId`, `/api/mercadopago/webhook`)**:
+   - Recebem **exclusivamente** `{ packageId }` do navegador; o preço (`priceBRL`) e a quantidade de créditos (`credits`) são lidos de `CREDIT_PACKAGES[packageId]` no servidor.
+   - Criam o registro em `/credit_orders/{orderId}` com `{ userId: req.authUser.uid, packageId, credits, amount: pkg.priceBRL, status: 'pending', credited: false, createdAt }`.
+   - O **Webhook (`POST /api/mercadopago/webhook`)** valida a assinatura `x-signature` (HMAC-SHA256 com `process.env.MP_WEBHOOK_SECRET`), consulta o pagamento oficial em `https://api.mercadopago.com/v1/payments/{paymentId}` usando `process.env.MERCADO_PAGO_ACCESS_TOKEN` e, se `status === 'approved'`, chama a função interna `creditOrderIdempotently(orderId, paymentId)` dentro de `db.runTransaction()`, verificando `if (orderData.credited === true) return;` antes de somar os créditos ao usuário.
+   - O endpoint `GET /api/mercadopago/order-status/:orderId` (`requireAuth`) também verifica no Mercado Pago se o pedido já foi aprovado e chama a mesma função idempotente `creditOrderIdempotently`, servindo apenas para atualizar a UI em tempo real sem qualquer risco de duplicação ou dependência do navegador estar aberto.
+6. **Endpoints Atômicos de Consumo de Créditos (`/api/credits/consume-and-execute`)**:
+   - Na geração de currículo IA (`POST /api/ai/generate-resume`, custo 15 créditos), verifique primeiro se o usuário possui `credits >= 15`, chame o modelo Gemini (`@google/genai`), valide o JSON retornado e **somente após o sucesso da geração** debite os 15 créditos via `db.runTransaction` (atendendo ao requisito RF-031 de não debitar créditos em caso de falha).
+
+### Estrutura Essencial para `server.ts` (Funções Críticas de Pagamento e Crédito Idempotente)
+```typescript
+import crypto from 'crypto';
+import express, { Request, Response, NextFunction } from 'express';
+import admin from 'firebase-admin';
+import { CREDIT_PACKAGES, CREDIT_COSTS, INITIAL_WELCOME_CREDITS } from './src/shared/creditPackages';
+import { validateCPF, validateCNPJMath, normalizeDocument } from './src/services/cnpjService';
+
+// Inicialização segura do Firebase Admin
+if (!admin.apps.length) {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+  } else {
+    admin.initializeApp();
+  }
+}
+
+const adminDb = admin.firestore();
+
+export interface AuthenticatedRequest extends Request {
+  authUser?: admin.auth.DecodedIdToken;
+}
+
+// Middleware de autenticação JWT obrigatória (AUD-16)
+export async function requireAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Não autenticado. Token Bearer ausente.' });
+  }
+  const idToken = authHeader.split('Bearer ')[1].trim();
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    req.authUser = decoded;
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Sessão inválida ou expirada. Faça login novamente.' });
+  }
+}
+
+// Rate limiter em memória por IP/UID (AUD-16)
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+export function rateLimiter(maxRequests: number, windowMs: number) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    const key = `${req.authUser?.uid || req.ip}:${req.baseUrl || req.path}`;
+    const now = Date.now();
+    const record = rateLimitMap.get(key);
+    if (!record || now > record.resetAt) {
+      rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    if (record.count >= maxRequests) {
+      return res.status(429).json({
+        error: 'Muitas requisições em um curto intervalo. Aguarde um minuto e tente novamente.'
+      });
+    }
+    record.count += 1;
+    return next();
+  };
+}
+
+// Validação de assinatura HMAC-SHA256 do Webhook do Mercado Pago (AUD-10)
+export function verifyMercadoPagoSignature(req: Request): boolean {
+  const secret = process.env.MP_WEBHOOK_SECRET;
+  if (!secret) return true; // Fallback seguro apenas se o segredo ainda não estiver configurado no ambiente
+  const xSignature = req.headers['x-signature'] as string | undefined;
+  const xRequestId = req.headers['x-request-id'] as string | undefined;
+  if (!xSignature) return false;
+
+  const parts = xSignature.split(',');
+  let ts = '';
+  let v1 = '';
+  for (const part of parts) {
+    const [k, v] = part.trim().split('=');
+    if (k === 'ts') ts = v;
+    if (k === 'v1') v1 = v;
+  }
+  if (!ts || !v1) return false;
+
+  const dataId = (req.query['data.id'] as string) || req.body?.data?.id || '';
+  const manifest = `id:${dataId};request-id:${xRequestId || ''};ts:${ts};`;
+  const hmac = crypto.createHmac('sha256', secret).update(manifest).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(hmac, 'utf8'), Buffer.from(v1, 'utf8'));
+}
+
+// Concessão Atômica e Idempotente de Créditos no Servidor (AUD-09 / AUD-10)
+export async function creditOrderIdempotently(orderId: string, mpPaymentId: string, mpStatus: string) {
+  if (mpStatus !== 'approved') return { credited: false, status: mpStatus };
+
+  const orderRef = adminDb.collection('credit_orders').doc(orderId);
+  return await adminDb.runTransaction(async (tx) => {
+    const orderSnap = await tx.get(orderRef);
+    if (!orderSnap.exists) {
+      throw new Error(`Pedido ${orderId} não encontrado.`);
+    }
+    const orderData = orderSnap.data()!;
+    if (orderData.credited === true) {
+      return { credited: true, alreadyProcessed: true, credits: orderData.credits };
+    }
+
+    const userRef = adminDb.collection('users').doc(orderData.userId);
+    const userSnap = await tx.get(userRef);
+    const currentCredits = userSnap.exists ? Number(userSnap.data()?.credits || 0) : 0;
+    const creditsToAdd = Number(orderData.credits || 0);
+    const newBalance = currentCredits + creditsToAdd;
+
+    tx.set(userRef, {
+      credits: newBalance,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    tx.update(orderRef, {
+      status: 'approved',
+      credited: true,
+      mpPaymentId: String(mpPaymentId),
+      creditedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    const txRef = adminDb.collection('credit_transactions').doc();
+    tx.set(txRef, {
+      userId: orderData.userId,
+      orderId,
+      mpPaymentId: String(mpPaymentId),
+      type: 'credit_purchase',
+      amount: creditsToAdd,
+      balanceAfter: newBalance,
+      priceBRL: orderData.amount,
+      description: `Compra aprovada: ${orderData.packageName || `${creditsToAdd} créditos`}`,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    return { credited: true, alreadyProcessed: false, credits: creditsToAdd, newBalance };
+  });
+}
+```
+
+## ETAPA 6: REMOÇÃO DE `confirmAndCreditOrder` NO CLIENTE E ATUALIZAÇÃO DO `MercadoPagoModal.tsx` E `PlansView.tsx` (AUD-04, AUD-09, AUD-11)
+
+1. **Em `src/services/mercadopagoService.ts`:**
+   - Remova completamente a função `confirmAndCreditOrder` que escrevia diretamente no Firestore a partir do navegador.
+   - As funções `createPixPayment(packageId: string)` e `createCheckoutPreference(packageId: string)` devem enviar **apenas** `{ packageId }` no corpo da requisição `POST`, anexando o cabeçalho `Authorization: Bearer ${await auth.currentUser?.getIdToken()}`.
+2. **Em `src/components/MercadoPagoModal.tsx`:**
+   - Exiba um aviso claro abaixo do QR Code PIX: `"Você pode pagar no aplicativo do seu banco com tranquilidade. Assim que o banco confirmar o PIX, seus créditos serão liberados automaticamente pelo nosso servidor, mesmo se você fechar esta janela."`
+   - Mantenha o `onSnapshot` no documento `/users/{uid}` ou consulta leve a `GET /api/mercadopago/order-status/:orderId` apenas para exibir a animação de sucesso caso o usuário permaneça com o modal aberto.
+3. **Em `src/components/PlansView.tsx`:**
+   - Renderize os cartões de pacotes iterando diretamente sobre `CREDIT_PACKAGE_LIST` de `src/shared/creditPackages.ts`, exibindo o preço formatado em `R$` e o custo por crédito (`R$ 1,49/cr`, `R$ 1,33/cr`, `R$ 1,16/cr`, `R$ 1,00/cr`, `R$ 0,90/cr`), além da tabela transparente de consumo:
+     - Candidatura em vaga: **10 créditos**
+     - Publicação de vaga: **10 créditos**
+     - Destaque de vaga no topo: **15 créditos**
+     - Geração de Currículo PDF ATS com IA: **15 créditos**
+     - Bônus de Boas-Vindas (1x por CPF/CNPJ validado): **30 créditos gratuitos**
+
+## ETAPA 7: SINCRONIZAÇÃO DE ROTAS NA URL, FORMATAÇÃO BRL, DEBOUNCE E UX DA VITRINE (`App.tsx`, `HomeView.tsx`, `JobDetailsModal.tsx`) (AUD-12, AUD-14, AUD-20)
+
+1. **Sincronização de URL e Botão "Voltar" (`src/App.tsx` — AUD-12):**
+   - Sincronize `currentView` e `selectedJobForDetails` com `window.location.search` (`?view=...&vaga=...`).
+   - Adicione um listener `window.addEventListener('popstate', handlePopState)` na montagem do `App.tsx` para que, quando o usuário clicar no botão físico "Voltar" do celular ou navegador ao visualizar um modal de vaga ou painel, a aplicação feche o modal ou retorne à tela anterior sem sair do site.
+   - Ao abrir os detalhes de uma vaga (`handleSelectJob(job)`), execute `window.history.pushState({}, '', \`/?vaga=\${job.id}\`)` e adicione botão `"Compartilhar Vaga"` em `JobDetailsModal.tsx` que copie o link direto `https://www.google.com/search?q=https://prudenempregos.com.br/%3Fvaga%3D%24{job.id}`.
+
+2. **Preservação da Intenção de Candidatura Pós-Login (`pendingJobApplication` — AUD-14):**
+   - Quando um visitante não autenticado clicar em `"Candidatar-se agora"` em `JobDetailsModal.tsx`, salve `sessionStorage.setItem('pendingJobId', job.id)` antes de abrir o `AuthModal`.
+   - Assim que o login/onboarding for concluído em `App.tsx`, verifique `sessionStorage.getItem('pendingJobId')`; se existir, remova a chave do `sessionStorage` e reabra automaticamente o `JobDetailsModal` daquela vaga para o candidato confirmar sua candidatura.
+
+3. **Correções Visuais, Formatação Monetária e Filtros em `src/components/HomeView.tsx` (AUD-14, AUD-20):**
+   - **Correção de Sobreposição do Header no Hero:** Adicione `pt-24 md:pt-28` na seção Hero para que o título `"Encontre sua próxima vaga em Presidente Prudente."` nunca fique coberto pela barra de navegação fixa.
+   - **Formatação de Salários (`src/utils/formatters.ts`):** Crie e utilize `formatSalaryBRL(salary)`:
+     ```typescript
+     export function formatSalaryBRL(value?: string | number | null): string {
+       if (value === undefined || value === null || value === '') return 'Salário a combinar';
+       const str = String(value).trim();
+       if (/combinar/i.test(str)) return 'Salário a combinar';
+       const numeric = Number(str.replace(/[^\d,.-]/g, '').replace(',', '.'));
+       if (!isNaN(numeric) && numeric > 0) {
+         return new Intl.NumberFormat('pt-BR', {
+           style: 'currency',
+           currency: 'BRL'
+         }).format(numeric);
+       }
+       return str.startsWith('R$') ? str : `R$ ${str}`;
+     }
+     ```
+   - **Ocultação de Registros de Teste em Produção:** Filtre da vitrine pública vagas cujo título ou nome da empresa corresponda a padrões de teste (`/^empresa teste$/i` ou `isTestRecord === true`).
+   - **Botão `"Limpar filtros"` Completo:** Ao clicar em `"Limpar filtros"`, resete simultaneamente `searchInput = ''`, `debouncedSearch = ''`, `selectedCity = ''`, `selectedModality = ''`, `selectedContractType = ''`, `selectedArea = ''` e limpe os query params da URL (`window.history.replaceState({}, '', '/')`).
+   - **Debounce de 300ms na Busca (AUD-20):** Implemente um `useEffect` com `setTimeout` de `300ms` entre `searchInput` (input controlado) e `debouncedSearch` (usado na filtragem), evitando re-renderizações pesadas a cada tecla digitada.
+
+4. **Code-Splitting com `React.lazy` e `Suspense` (`src/App.tsx` — AUD-20):**
+   - Carregue sob demanda os componentes pesados:
+     ```typescript
+     const CandidateDashboard = React.lazy(() => import('./components/CandidateDashboard'));
+     const CompanyDashboard = React.lazy(() => import('./components/CompanyDashboard'));
+     const AdminDashboard = React.lazy(() => import('./components/AdminDashboard'));
+     const ResumeGeneratorModal = React.lazy(() => import('./components/ResumeGeneratorModal'));
+     const MercadoPagoModal = React.lazy(() => import('./components/MercadoPagoModal'));
+     ```
+
+## ETAPA 8: MOTOR DETERMINÍSTICO DE MATCH PÓS-CANDIDATURA (40% / 25% / 20% / 15%) (AUD-13)
+
+Conforme a especificação oficial do projeto (RF-024 e RF-025):
+1. **Remova qualquer cálculo ou badge de `% de Match` antes da candidatura** nos cards públicos de `HomeView.tsx`.
+2. Crie o arquivo `src/utils/matchEngine.ts` que calcula o score de compatibilidade **exclusivamente no ato da candidatura (`applyToJob`)**, utilizando a ponderação auditável:
+   - **40% Habilidades e Competências Técnicas (`skillsScore`):** Proporção das skills exigidas pela vaga presentes no perfil do candidato.
+   - **25% Experiência Profissional (`experienceScore`):** Comparação entre o nível/tempo de experiência do candidato e os requisitos da vaga.
+   - **20% Palavras-Chave do Cargo e Descrição (`keywordsScore`):** Interseção de termos-chave normalizados (sem stopwords) entre o objetivo/resumo/histórico do candidato e o título/descrição da vaga.
+   - **15% Localização e Modalidade (`locationScore`):** 15 pontos se a vaga for Remota ou se a cidade do candidato for a mesma da vaga (ex.: Presidente Prudente); 8 pontos para cidades vizinhas da região (Álvares Machado, Regente Feijó, Pirapozinho, Martinópolis, Presidente Bernardes, Santo Anastácio); 0 se incompatível.
+
+### Arquivo: `src/utils/matchEngine.ts`
+```typescript
+export interface MatchBreakdown {
+  skillsScore: number;      // Máx: 40
+  experienceScore: number;  // Máx: 25
+  keywordsScore: number;    // Máx: 20
+  locationScore: number;    // Máx: 15
+  totalScore: number;       // 0 a 100
+  matchedSkills: string[];
+  missingSkills: string[];
+}
+
+const PRUDENTE_REGION_CITIES = [
+  'presidente prudente',
+  'alvares machado',
+  'regente feijo',
+  'pirapozinho',
+  'martinopolis',
+  'presidente bernardes',
+  'santo anastacio',
+  'anhandui',
+  'indiana',
+  'tarabai'
+];
+
+function normalizeText(text: string): string {
+  return (text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+export function calculateDeterministicMatch(candidateProfile: any, job: any): MatchBreakdown {
+  // 1. Habilidades / Competências (40 pontos)
+  const jobSkills: string[] = Array.isArray(job.skills) && job.skills.length > 0
+    ? job.skills.map((s: string) => normalizeText(s)).filter(Boolean)
+    : [];
+  const candidateSkills: string[] = Array.isArray(candidateProfile.skills)
+    ? candidateProfile.skills.map((s: string) => normalizeText(s)).filter(Boolean)
+    : [];
+  const candidateFullText = normalizeText(
+    `${candidateProfile.desiredRole || ''} ${candidateProfile.bio || ''} ${candidateSkills.join(' ')} ${JSON.stringify(candidateProfile.experiences || [])}`
+  );
+
+  const matchedSkills: string[] = [];
+  const missingSkills: string[] = [];
+
+  let skillsScore = 0;
+  if (jobSkills.length === 0) {
+    skillsScore = candidateSkills.length > 0 ? 32 : 20;
+  } else {
+    for (const reqSkill of jobSkills) {
+      if (candidateSkills.some(cs => cs.includes(reqSkill) || reqSkill.includes(cs)) || candidateFullText.includes(reqSkill)) {
+        matchedSkills.push(reqSkill);
+      } else {
+        missingSkills.push(reqSkill);
+      }
+    }
+    skillsScore = Math.round((matchedSkills.length / jobSkills.length) * 40);
+  }
+
+  // 2. Experiência Profissional (25 pontos)
+  const experiences = Array.isArray(candidateProfile.experiences) ? candidateProfile.experiences : [];
+  let experienceScore = 0;
+  if (experiences.length >= 3) {
+    experienceScore = 25;
+  } else if (experiences.length === 2) {
+    experienceScore = 20;
+  } else if (experiences.length === 1) {
+    experienceScore = 15;
+  } else if ((candidateProfile.bio || '').length > 80) {
+    experienceScore = 10;
+  } else {
+    experienceScore = 5;
+  }
+
+  // 3. Palavras-Chave do Cargo e Descrição (20 pontos)
+  const rawJobTokens = normalizeText(`${job.title || ''} ${job.description || ''} ${job.requirements || ''}`)
+    .split(/[^a-z0-9]+/)
+    .filter(token => token.length >= 4);
+  const uniqueJobKeywords = Array.from(new Set(rawJobTokens)).slice(0, 25);
+
+  let keywordsScore = 0;
+  if (uniqueJobKeywords.length > 0) {
+    const matchedKeywords = uniqueJobKeywords.filter(kw => candidateFullText.includes(kw));
+    keywordsScore = Math.min(20, Math.round((matchedKeywords.length / Math.min(uniqueJobKeywords.length, 12)) * 20));
+  } else {
+    keywordsScore = 12;
+  }
+
+  // 4. Localização e Modalidade (15 pontos)
+  const modality = normalizeText(job.modality || job.workModel || 'presencial');
+  const candidateCity = normalizeText(candidateProfile.city || '');
+  const jobCity = normalizeText(job.city || job.location || 'presidente prudente');
+
+  let locationScore = 0;
+  if (modality.includes('remot')) {
+    locationScore = 15;
+  } else if (candidateCity && jobCity && (candidateCity.includes(jobCity) || jobCity.includes(candidateCity))) {
+    locationScore = 15;
+  } else if (
+    PRUDENTE_REGION_CITIES.some(c => candidateCity.includes(c)) &&
+    PRUDENTE_REGION_CITIES.some(c => jobCity.includes(c))
+  ) {
+    locationScore = 10;
+  } else if (candidateCity) {
+    locationScore = 5;
+  }
+
+  const totalScore = Math.min(100, skillsScore + experienceScore + keywordsScore + locationScore);
+
+  return {
+    skillsScore,
+    experienceScore,
+    keywordsScore,
+    locationScore,
+    totalScore,
+    matchedSkills,
+    missingSkills
+  };
+}
+```
+
+## ETAPA 9: WIZARDS EM 4 ETAPAS COM BARRA DE PROGRESSO E RASCUNHO EM `localStorage` (AUD-15)
+
+1. **No Painel do Candidato (`src/components/CandidateDashboard.tsx`):**
+   - Estruture o preenchimento do currículo em um Wizard de **4 etapas claras** com barra de progresso (`25% -> 50% -> 75% -> 100%`):
+     - **Etapa 1:** Dados Pessoais e Objetivo Profissional (Nome, Cargo Desejado, Cidade, Resumo/Bio, Telefone Privado salvo em `private_profiles`).
+     - **Etapa 2:** Experiências Profissionais (Empresa, Cargo, Período, Principais Conquistas).
+     - **Etapa 3:** Formação Acadêmica e Cursos Complementares.
+     - **Etapa 4:** Habilidades Técnicas (`skills`) e Revisão Final.
+   - Salve automaticamente o rascunho em `localStorage.setItem(\`pruden_cv_draft_\${uid}\`, JSON.stringify(formData))` a cada alteração e limpe o rascunho ao salvar no Firestore.
+
+2. **No Painel da Empresa (`src/components/CompanyDashboard.tsx`):**
+   - Estruture o formulário de publicação de vaga em um Wizard de **4 etapas** com salvamento automático em `localStorage.setItem(\`pruden_job_draft_\${uid}\`, JSON.stringify(jobDraft))`:
+     - **Etapa 1:** Dados Básicos da Vaga (Título do Cargo, Área, Modalidade Presencial/Híbrido/Remoto, Tipo de Contrato CLT/PJ/Estágio, Cidade).
+     - **Etapa 2:** Remuneração e Benefícios (Faixa Salarial numérica formatada em BRL ou "A combinar", Vale Alimentação, Plano de Saúde, etc.).
+     - **Etapa 3:** Descrição Detalhada e Requisitos / Habilidades (`skills` em tags para alimentar o motor de Match).
+     - **Etapa 4:** Revisão, Opção de Destaque (+15 créditos) e Confirmação de Publicação (10 créditos debitados atomicamente).
+   - Na visualização de candidatos inscritos em cada vaga, exiba o **Score Total de Match (0 a 100%)** e o **Breakdown Detalhado (Habilidades X/40, Experiência X/25, Palavras-chave X/20, Localização X/15)** calculado pós-candidatura.
+
+## ETAPA 10: GERADOR DE CURRÍCULO PDF ATS COM 3 MODELOS LINEARES SELECIONÁVEIS (AUD-11, AUD-15)
+
+Atualize `src/components/ResumeGeneratorModal.tsx`:
+1. Ofereça ao candidato a escolha visual entre os **3 modelos lineares 100% compatíveis com sistemas ATS (Applicant Tracking Systems)**:
+   - **Modelo 1 — Clássico Executivo (`classic_executive`):** Tipografia tradicional serifada/limpa, divisores horizontais sóbrios, cabeçalho centralizado e foco em trajetória corporativa/administrativa.
+   - **Modelo 2 — Moderno Minimalista (`modern_minimal`):** Tipografia sans-serif contemporânea (Inter/Helvetica), hierarquia limpa com espaçamento amplo e tags discretas de competências em texto corrido.
+   - **Modelo 3 — Técnico Compacto (`tech_compact`):** Alta densidade informacional em página única A4, seção de habilidades técnicas e ferramentas em destaque logo abaixo do resumo profissional, ideal para TI, Engenharia e Operações.
+2. **Regras Estritas de Compatibilidade ATS e Débito Seguro (RF-014, RF-016, RF-031):**
+   - Todos os 3 modelos devem gerar **PDF com texto selecionável real** (nunca gere PDF como imagem rasterizada de `html2canvas` puro sem camada de texto), em coluna única linear (sem barras laterais duplas ou gráficos de estrelas/barras que confundem leitores ATS).
+   - O débito de **15 créditos** só pode ser confirmado após a geração bem-sucedida do conteúdo pela IA e validação do documento PDF; se ocorrer qualquer erro de rede ou falha de geração, nenhum crédito deve ser descontado do usuário.
+
+## ETAPA 11: ADAPTAÇÃO PARA NETLIFY FUNCTIONS (`netlify.toml` + `netlify/functions/api.ts`) E APP CHECK (AUD-17, AUD-18)
+
+Para resolver em definitivo a incompatibilidade entre o servidor Express (`server.ts`) do Google AI Studio e a hospedagem no Netlify (`https://prudenempregos.netlify.app/` e `https://prudenempregos.com.br/`):
+
+1. Em `server.ts`, exporte a instância `export { app };` e só execute `app.listen(PORT)` quando não estiver rodando em ambiente serverless (`if (!process.env.NETLIFY) { app.listen(PORT, ...); }`).
+2. Crie o arquivo `netlify/functions/api.ts` encapsulando o `app` Express (ou utilizando um handler compatível com Netlify Functions) e configure `netlify.toml` para redirecionar `/api/*` para `/.netlify/functions/api/:splat` **antes** da regra de SPA (`/* -> /index.html`).
+
+### Arquivo: `netlify.toml`
+```toml
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(self)"
+```
+
+3. **Inicialização Opcional de Firebase App Check (`src/firebase.ts` — AUD-18):**
+   - Adicione suporte a `initializeAppCheck` quando `import.meta.env.VITE_RECAPTCHA_SITE_KEY` estiver definido, e atualize `.env.example` documentando todas as variáveis de ambiente necessárias sem expor segredos reais:
+     ```env
+     # Variáveis de Ambiente — Backend (Netlify / Google AI Studio)
+     GEMINI_API_KEY=
+     MERCADO_PAGO_ACCESS_TOKEN=
+     MP_WEBHOOK_SECRET=
+     FIREBASE_SERVICE_ACCOUNT=
+
+     # Variáveis de Ambiente — Frontend (Vite)
+     VITE_MERCADO_PAGO_PUBLIC_KEY=
+     VITE_RECAPTCHA_SITE_KEY=
+     VITE_APP_URL=https://prudenempregos.com.br
+     ```
+
+## ETAPA 12: SEO REGIONALIZADO (`index.html`), SCHEMA.ORG `JobPosting` (GOOGLE JOBS) E TESTES DE REGRAS (AUD-19, AUD-20)
+
+1. **Substitua `<title>Vite + React</title>` em `index.html` (AUD-19):**
+   Atualize `index.html` com metadados completos para Presidente Prudente e região:
+
+### Arquivo: `index.html`
+```html
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pruden Empregos | Vagas de Emprego e Currículos em Presidente Prudente e Região</title>
+    <meta
+      name="description"
+      content="Encontre vagas de emprego atualizadas em Presidente Prudente e região, cadastre seu currículo gratuitamente, gere currículos PDF otimizados para ATS com Inteligência Artificial e contrate talentos locais verificados."
+    />
+    <meta name="keywords" content="vagas de emprego Presidente Prudente, empregos Prudente, currículo IA, vagas Oeste Paulista, Pruden Empregos, recrutamento Presidente Prudente" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://prudenempregos.com.br/" />
+
+    <!-- Open Graph / WhatsApp / LinkedIn -->
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:site_name" content="Pruden Empregos" />
+    <meta property="og:title" content="Pruden Empregos | Oportunidades em Presidente Prudente e Região" />
+    <meta
+      property="og:description"
+      content="Conectando candidatos e empresas verificadas em Presidente Prudente. Crie seu currículo compatível com ATS e candidate-se às melhores oportunidades locais."
+    />
+    <meta property="og:url" content="https://prudenempregos.com.br/" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Pruden Empregos | Vagas em Presidente Prudente" />
+    <meta
+      name="twitter:description"
+      content="Portal regional de empregos e geração inteligente de currículos em Presidente Prudente e região."
+    />
+  </head>
+  <body class="bg-slate-50 text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+```
+
+2. **Injeção Dinâmica de JSON-LD `JobPosting` (Schema.org para Google Jobs) em `src/components/JobDetailsModal.tsx` (AUD-19):**
+   - Sempre que uma vaga estiver aberta em `JobDetailsModal.tsx`, atualize `document.title = \`\${job.title} em \${job.city || 'Presidente Prudente'} | Pruden Empregos\`` e injete uma tag `&lt;script id=&quot;job-posting-jsonld&quot; type=&quot;application/ld+json&quot;&gt;` no `&lt;head&gt;` com a estrutura oficial `JobPosting` do Schema.org (`title`, `description`, `datePosted`, `employmentType`, `hiringOrganization`, `jobLocation` com `addressLocality: job.city || "Presidente Prudente"`, `addressRegion: "SP"`, `addressCountry: "BR"`), removendo-a no cleanup do `useEffect`.
+
+3. **Paginação de Consultas no Firestore (`src/services/jobsService.ts` — AUD-20):**
+   - Utilize `query(collection(db, 'jobs'), where('status', '==', 'active'), orderBy('createdAt', 'desc'), limit(24))` com suporte a `startAfter(lastVisibleDoc)` no botão `"Carregar mais vagas"`.
+
+4. **Suíte de Testes de Segurança e Regras (`tests/firestore.rules.test.ts` — AUD-20):**
+   - Crie o arquivo `tests/firestore.rules.test.ts` documentando os casos de teste para `@firebase/rules-unit-testing` e `vitest` cobrindo:
+     - Bloqueio de leitura/escrita por cliente deslogado mesmo usando IDs com prefixo `usr_...` (AUD-01).
+     - Bloqueio de alteração direta dos campos `credits`, `role` e `isVerifiedCompany` pelo próprio usuário (AUD-02).
+     - Bloqueio de leitura por terceiros em `/private_profiles/{userId}` e `/applications/{appId}` (AUD-03, AUD-05).
+     - Bloqueio de escrita pelo cliente em `/credit_orders` e `/credit_transactions` (AUD-04).
+
+## CHECKLIST FINAL DE VERIFICAÇÃO ANTES DE ENCERRAR
+
+Após aplicar todas as modificações acima, verifique se:
+- [ ] O projeto compila sem erros de TypeScript (`npm run build`).
+- [ ] Nenhuma referência ativa a `isDirectCloudUid` ou `directCloudAuth` permanece em `firestore.rules` ou nos componentes React.
+- [ ] Todos os pacotes de créditos em `PlansView.tsx`, `MercadoPagoModal.tsx` e `server.ts` vêm de `src/shared/creditPackages.ts` (com 10 créditos = R$ 14,90 e 15 créditos = R$ 19,90).
+- [ ] O cálculo de Match ocorre exclusivamente no momento da candidatura com os pesos 40/25/20/15 e sem exibir `% de Match` na vitrine pública antes da inscrição.
+- [ ] O `<title>` em `index.html` foi atualizado para `"Pruden Empregos | Vagas de Emprego e Currículos em Presidente Prudente e Região"`.

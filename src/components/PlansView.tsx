@@ -2,15 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { PricingPlan, PlanPeriod, UserProfile, CreditOrder, CreditTransaction } from '../types';
 import { formatPriceBRL } from '../utils/plansData';
 import {
-  CREDIT_PACKAGES,
-  CANDIDATE_RESUME_CREDIT_PACKAGE,
   CreditPackage,
   INITIAL_FREE_CREDITS,
   APPLY_JOB_CREDIT_COST,
   RESUME_PDF_CREDIT_COST,
   POST_JOB_CREDIT_COST,
   BOOST_JOB_CREDIT_COST,
+  getCreditPackageById,
 } from '../utils/creditsData';
+import { CREDIT_PACKAGE_LIST } from '../shared/creditPackages';
 import {
   getUserCreditsHistory,
   checkCreditOrderStatus,
@@ -107,12 +107,36 @@ export const PlansView: React.FC<PlansViewProps> = ({
     }
   };
 
-  const allPackages: Array<{ pkg: CreditPackage; audience: 'candidate' | 'company' | 'both' }> = [
-    { pkg: CREDIT_PACKAGES[0], audience: 'both' }, // 10 créditos — R$ 14,90
-    { pkg: CANDIDATE_RESUME_CREDIT_PACKAGE, audience: 'both' }, // 15 créditos — R$ 19,90
-    { pkg: CREDIT_PACKAGES[1], audience: 'both' }, // 35 créditos (30+5) — R$ 44,90
-    { pkg: CREDIT_PACKAGES[2], audience: 'company' }, // 100 créditos (80+20) — R$ 109,90
-  ];
+  const allPackages: Array<{ pkg: CreditPackage; audience: 'candidate' | 'company' | 'both' }> =
+    CREDIT_PACKAGE_LIST.map((shared) => {
+      const resolved: CreditPackage = getCreditPackageById(shared.id) || {
+        id: shared.id,
+        title: shared.name,
+        subtitle: shared.description,
+        credits: shared.credits,
+        bonusCredits: 0,
+        totalCredits: shared.credits,
+        price: shared.priceBRL,
+        originalPrice: Number((shared.priceBRL * 1.25).toFixed(2)),
+        costPerCredit: shared.unitPriceBRL,
+        badge: shared.badge,
+        isFeatured: Boolean(shared.popular),
+        description: shared.description,
+        ctaLabel: shared.ctaLabel,
+        features: [
+          `${shared.credits} créditos liberados na hora (${formatPriceBRL(shared.unitPriceBRL)}/crédito)`,
+          shared.description,
+          'Créditos cumulativos que nunca expiram',
+        ],
+      };
+      const audience: 'candidate' | 'company' | 'both' =
+        shared.id === 'pkg_15'
+          ? 'candidate'
+          : shared.id === 'pkg_50' || shared.id === 'pkg_100'
+          ? 'company'
+          : 'both';
+      return { pkg: resolved, audience };
+    });
 
   const visiblePackages = allPackages.filter((item) => {
     if (filter === 'all') return true;

@@ -41,6 +41,11 @@ import {
   generateSelectableResumePdfBytes,
   generateSelectableResumePdfDataUrl,
 } from './src/utils/pdfResumeGenerator';
+import {
+  CREDIT_PACKAGES as SHARED_CREDIT_PACKAGES,
+  CREDIT_COSTS,
+  INITIAL_WELCOME_CREDITS,
+} from './src/shared/creditPackages';
 
 dotenv.config();
 
@@ -688,6 +693,46 @@ const SERVER_CREDIT_PACKAGES: Record<
   string,
   { id: string; title: string; credits: number; bonus: number; totalCredits: number; price: number }
 > = {
+  pkg_10: {
+    id: SHARED_CREDIT_PACKAGES.pkg_10.id,
+    title: SHARED_CREDIT_PACKAGES.pkg_10.name,
+    credits: SHARED_CREDIT_PACKAGES.pkg_10.credits,
+    bonus: 0,
+    totalCredits: SHARED_CREDIT_PACKAGES.pkg_10.credits,
+    price: SHARED_CREDIT_PACKAGES.pkg_10.priceBRL,
+  },
+  pkg_15: {
+    id: SHARED_CREDIT_PACKAGES.pkg_15.id,
+    title: SHARED_CREDIT_PACKAGES.pkg_15.name,
+    credits: SHARED_CREDIT_PACKAGES.pkg_15.credits,
+    bonus: 0,
+    totalCredits: SHARED_CREDIT_PACKAGES.pkg_15.credits,
+    price: SHARED_CREDIT_PACKAGES.pkg_15.priceBRL,
+  },
+  pkg_30: {
+    id: SHARED_CREDIT_PACKAGES.pkg_30.id,
+    title: SHARED_CREDIT_PACKAGES.pkg_30.name,
+    credits: SHARED_CREDIT_PACKAGES.pkg_30.credits,
+    bonus: 0,
+    totalCredits: SHARED_CREDIT_PACKAGES.pkg_30.credits,
+    price: SHARED_CREDIT_PACKAGES.pkg_30.priceBRL,
+  },
+  pkg_50: {
+    id: SHARED_CREDIT_PACKAGES.pkg_50.id,
+    title: SHARED_CREDIT_PACKAGES.pkg_50.name,
+    credits: SHARED_CREDIT_PACKAGES.pkg_50.credits,
+    bonus: 0,
+    totalCredits: SHARED_CREDIT_PACKAGES.pkg_50.credits,
+    price: SHARED_CREDIT_PACKAGES.pkg_50.priceBRL,
+  },
+  pkg_100: {
+    id: SHARED_CREDIT_PACKAGES.pkg_100.id,
+    title: SHARED_CREDIT_PACKAGES.pkg_100.name,
+    credits: SHARED_CREDIT_PACKAGES.pkg_100.credits,
+    bonus: 0,
+    totalCredits: SHARED_CREDIT_PACKAGES.pkg_100.credits,
+    price: SHARED_CREDIT_PACKAGES.pkg_100.priceBRL,
+  },
   pack_starter: {
     id: 'pack_starter',
     title: 'Pacote Inicial',
@@ -708,17 +753,17 @@ const SERVER_CREDIT_PACKAGES: Record<
     id: 'pack_pro',
     title: 'Pacote Crescimento Pro',
     credits: 30,
-    bonus: 5,
-    totalCredits: 35,
-    price: 44.9,
+    bonus: 0,
+    totalCredits: 30,
+    price: 34.9,
   },
   pack_business: {
     id: 'pack_business',
     title: 'Pacote Corporativo Max',
-    credits: 80,
-    bonus: 20,
+    credits: 100,
+    bonus: 0,
     totalCredits: 100,
-    price: 109.9,
+    price: 89.9,
   },
 };
 
@@ -1517,7 +1562,7 @@ app.post('/api/mercadopago/process-pix', handleCreateOrProcessPix);
 app.post('/api/mercadopago/create-pix', handleCreateOrProcessPix);
 
 // Consulta de status do pedido de créditos em tempo real com validação direta
-app.get('/api/mercadopago/order-status/:orderId', async (req, res) => {
+const handleOrderStatusCheck = async (req: express.Request, res: express.Response) => {
   const { orderId } = req.params;
 
   try {
@@ -1559,6 +1604,9 @@ app.get('/api/mercadopago/order-status/:orderId', async (req, res) => {
     const freshOrder = serverCreditOrdersMap.get(orderId) || orderData;
 
     return res.json({
+      status: freshOrder?.status || 'pending',
+      credited: Boolean(freshOrder?.credited),
+      credits: freshOrder?.credits || 0,
       order: freshOrder,
       approved: freshOrder?.status === 'approved',
     });
@@ -1566,7 +1614,10 @@ app.get('/api/mercadopago/order-status/:orderId', async (req, res) => {
     console.error('Erro ao consultar status do pedido:', err);
     return res.status(500).json({ error: 'Falha ao consultar pedido.' });
   }
-});
+};
+
+app.get('/api/mercadopago/order-status/:orderId', handleOrderStatusCheck);
+app.get('/api/mercadopago/check-order/:orderId', handleOrderStatusCheck);
 
 // Confirmação com validação para liberação segura de créditos
 app.post('/api/mercadopago/confirm-credit-order', async (req, res) => {
@@ -2500,6 +2551,66 @@ app.post('/api/users/clear-registry', (req, res) => {
 });
 
 // ==========================================
+// ONBOARDING OBRIGATÓRIO PÓS-LOGIN GOOGLE E VALIDAÇÃO CPF/CNPJ (AUD-02, AUD-06, AUD-07, AUD-10)
+// ==========================================
+app.post('/api/auth/complete-onboarding', async (req, res) => {
+  const { uid, email, role, document, name, phone, city, lgpdAccepted, razaoSocial, nomeFantasia } =
+    req.body || {};
+
+  if (!uid) {
+    return res.status(401).json({ error: 'Sessão inválida ou expirada.' });
+  }
+
+  if (!lgpdAccepted) {
+    return res.status(400).json({ error: 'Aceite dos Termos de Uso e LGPD é obrigatório.' });
+  }
+
+  const docType: 'CPF' | 'CNPJ' = role === 'company' ? 'CNPJ' : 'CPF';
+  const cleanDoc = docType === 'CPF' ? normalizeCPF(document || '') : normalizeCNPJ(document || '');
+
+  if (docType === 'CPF' && !isValidCPF(cleanDoc)) {
+    return res.status(400).json({ error: 'CPF inválido. Verifique os 11 dígitos informados.' });
+  }
+
+  if (docType === 'CNPJ' && !isValidCNPJ(cleanDoc)) {
+    return res.status(400).json({ error: 'CNPJ inválido. Verifique os 14 dígitos informados.' });
+  }
+
+  const docKey = getDocumentRegistryKey(docType, cleanDoc);
+  const existingMem = serverDocumentRegistry.get(docKey);
+  if (existingMem && existingMem.uid !== uid) {
+    return res.status(409).json({
+      error: 'Este CPF/CNPJ já está vinculado a outra conta no Pruden Empregos.',
+    });
+  }
+
+  const now = new Date().toISOString();
+  serverDocumentRegistry.set(docKey, {
+    docKey,
+    documentType: docType,
+    normalizedDocument: cleanDoc,
+    uid,
+    createdAt: now,
+  });
+
+  if (!serverUserCreditsMap.has(uid)) {
+    serverUserCreditsMap.set(uid, INITIAL_WELCOME_CREDITS);
+  }
+  const finalCredits = serverUserCreditsMap.get(uid) ?? INITIAL_WELCOME_CREDITS;
+
+  return res.json({
+    success: true,
+    credits: finalCredits,
+    role: role === 'company' ? 'company' : 'candidate',
+    isVerifiedCompany: role === 'company',
+    email: email || '',
+    name: name || nomeFantasia || razaoSocial || '',
+    city: city || 'Presidente Prudente, SP',
+    phone: phone || '',
+  });
+});
+
+// ==========================================
 // GERADOR PROFISSIONAL DE CURRÍCULOS ATS (15 CRÉDITOS)
 // ==========================================
 app.post('/api/resumes/generate', async (req, res) => {
@@ -2828,6 +2939,11 @@ async function startServer() {
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-});
+if (!process.env.NETLIFY) {
+  startServer().catch((err) => {
+    console.error('Failed to start server:', err);
+  });
+}
+
+export { app, processCreditOrderApproval as creditOrderIdempotently };
+

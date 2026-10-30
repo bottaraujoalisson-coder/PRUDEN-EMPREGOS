@@ -143,6 +143,34 @@ export const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     ownVehicle: (user.ownVehicle || 'nao') as VehicleRequirement,
   });
 
+  // Persistência de rascunho em localStorage (AUD-15)
+  useEffect(() => {
+    try {
+      const savedDraft = localStorage.getItem(`pruden_cv_draft_${user.uid}`);
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft);
+        if (parsed && typeof parsed === 'object') {
+          setFormData((prev) => ({
+            ...prev,
+            role: prev.role || parsed.role || '',
+            about: prev.about || parsed.about || '',
+            skillsStr: prev.skillsStr || parsed.skillsStr || '',
+          }));
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [user.uid]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`pruden_cv_draft_${user.uid}`, JSON.stringify(formData));
+    } catch {
+      // ignore storage errors
+    }
+  }, [formData, user.uid]);
+
   const [jobAlertsEnabled, setJobAlertsEnabled] = useState<boolean>(
     user.jobAlertsEnabled ?? true
   );

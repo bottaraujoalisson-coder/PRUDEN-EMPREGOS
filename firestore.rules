@@ -1,263 +1,226 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Default deny all
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isDirectCloudUid(uid) {
-      return uid is string && uid.size() >= 8 && uid.size() <= 128 && uid.matches('^usr_[a-zA-Z0-9_\\-]+$');
+    // =========================================================================
+    // FUNÇÕES AUXILIARES DE AUTENTICAÇÃO E AUTORIZAÇÃO (ZERO-TRUST)
+    // =========================================================================
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
     }
 
     function isOwner(userId) {
-      return (isSignedIn() && request.auth.uid == userId) || isDirectCloudUid(userId);
+      return isAuthenticated() && request.auth.uid == userId;
     }
 
     function isAdmin() {
-      return isSignedIn() && (
+      return isAuthenticated() && (
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
-        (
-          'email' in request.auth.token &&
-          request.auth.token.email_verified == true &&
-          request.auth.token.email.lower() == 'bottaraujoalisson@gmail.com'
-        )
+        request.auth.token.email == 'bottaraujoalisson@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'admin'))
       );
     }
 
-    function isValidId(id) {
-      return id is string && id.size() >= 2 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function isVerifiedCompanyUser() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'company' ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.type == 'company') &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerifiedCompany == true ||
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isVerified == true);
     }
 
-    function incoming() {
-      return request.resource.data;
+    // Impede que o usuário manipule campos financeiros, de privilégio ou verificação
+    function hasNoPrivilegedFieldsOnCreate(data) {
+      return (!('role' in data) || data.role in ['candidate', 'company']) &&
+             (!('type' in data) || data.type in ['candidate', 'company']) &&
+             (!('credits' in data) || (data.credits is number && data.credits >= 0 && data.credits <= 30)) &&
+             (!('jobPostingCredits' in data) || data.jobPostingCredits == 0) &&
+             (!('plan' in data) || data.plan == 'free') &&
+             (!('welcomeCreditsGranted' in data) || data.welcomeCreditsGranted is bool) &&
+             (!('isVerifiedCompany' in data) || data.isVerifiedCompany is bool);
     }
 
-    function existing() {
-      return resource.data;
+    function doesNotModifyProtectedUserFields() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'credits',
+        'jobPostingCredits',
+        'role',
+        'plan',
+        'planExpiresAt',
+        'welcomeCreditsGranted',
+        'isVerifiedCompany',
+        'cnpjStatus',
+        'documentVerified'
+      ]);
     }
 
-    // TEST CONNECTION PING
-    match /test/{docId} {
-      allow read: if true;
+    function doesNotContainSensitivePII(data) {
+      return !data.keys().hasAny([
+        'cpf',
+        'cnpj',
+        'document',
+        'fiscalAddress',
+        'privatePhone',
+        'birthDate',
+        'passwordHash',
+        'salt'
+      ]);
     }
 
-    // DIRECT CLOUD AUTH ACCOUNTS (PBKDF2-HMAC-SHA256 hashed credentials for custom/Netlify domains)
-    match /auth_accounts/{accountId} {
-      allow get: if isValidId(accountId);
-      allow list: if false;
-      allow create: if isValidId(accountId)
-        && incoming().id == accountId
-        && isDirectCloudUid(incoming().uid)
-        && incoming().email is string && incoming().email.size() <= 254
-        && incoming().passwordHash is string && incoming().passwordHash.size() >= 16 && incoming().passwordHash.size() <= 160;
-      allow update: if isValidId(accountId)
-        && incoming().id == accountId
-        && incoming().uid == existing().uid
-        && incoming().email == existing().email
-        && incoming().passwordHash is string && incoming().passwordHash.size() >= 16 && incoming().passwordHash.size() <= 160;
-      allow delete: if isAdmin();
+    // =========================================================================
+    // BLOQUEIO DEFINITIVO DE COLEÇÕES DE FALLBACK LEGADAS (AUD-01 / AUD-06)
+    // =========================================================================
+    match /auth_accounts/{docId} {
+      allow read, write: if false;
     }
 
-    // CROSS-DOMAIN GOOGLE AUTH BRIDGE
-    match /auth_bridge/{sessionId} {
-      allow get: if isValidId(sessionId);
-      allow list: if false;
-      allow create, update: if isValidId(sessionId)
-        && incoming().sessionId == sessionId
-        && incoming().uid is string && incoming().uid.size() <= 128;
-      allow delete: if isValidId(sessionId);
+    match /auth_bridge/{docId} {
+      allow read, write: if false;
     }
 
-    // USERS COLLECTION (Strict RBAC & System Field Protection)
+    // =========================================================================
+    // ADMINISTRADORES (AUD-05)
+    // =========================================================================
+    match /admins/{adminId} {
+      allow get: if isOwner(adminId) || isAdmin();
+      allow list: if isAdmin();
+      allow write: if false; // Gerenciado exclusivamente via Admin SDK / Console
+    }
+
+    // =========================================================================
+    // USUÁRIOS (AUD-02)
+    // =========================================================================
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdmin() || resource.data.type == 'company';
+      allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-
-      allow create: if isValidId(userId)
-        && ((isSignedIn() && request.auth.uid == userId) || isDirectCloudUid(userId))
-        && (!('uid' in incoming()) || incoming().uid == userId)
-        && (
-          isAdmin() ||
-          (incoming().type in ['candidate', 'company'] && (!('credits' in incoming()) || (incoming().credits is number && incoming().credits >= 0 && incoming().credits <= 30))) ||
-          (incoming().email == 'bottaraujoalisson@gmail.com' && incoming().type == 'admin')
-        );
-
-      allow update: if (isOwner(userId) || isAdmin())
-        && (!('uid' in incoming()) || incoming().uid == userId)
-        && (
-          isAdmin() ||
-          (
-            !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-              'jobPostingCredits',
-              'plan',
-              'planExpiresAt',
-              'isVerifiedCompany'
-            ]) &&
-            (!('type' in incoming()) || incoming().type == existing().type || incoming().type in ['candidate', 'company']) &&
-            (
-              !('welcomeCreditsGranted' in incoming()) ||
-              incoming().welcomeCreditsGranted == existing().get('welcomeCreditsGranted', false) ||
-              (existing().get('welcomeCreditsGranted', false) == false && incoming().welcomeCreditsGranted == true)
-            )
-          )
-        );
-
+      allow create: if isOwner(userId) && hasNoPrivilegedFieldsOnCreate(request.resource.data);
+      allow update: if isAdmin() || (isOwner(userId) && doesNotModifyProtectedUserFields());
       allow delete: if isAdmin();
+
+      match /creditTransactions/{txId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if false; // Exclusivo via Admin SDK no server.ts
+      }
     }
 
-    // PROFILES COLLECTION (Public Profile Data - RF-012 / RF-022)
+    // =========================================================================
+    // PERFIS PÚBLICOS DE VITRINE (AUD-02 / AUD-03 - LGPD)
+    // =========================================================================
     match /profiles/{userId} {
-      allow get: if isSignedIn() || resource.data.type == 'company' || isOwner(userId) || isAdmin();
-      allow list: if isAdmin();
-      allow create: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow update: if (isOwner(userId) || isAdmin())
-        && (
-          isAdmin() ||
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-            'credits',
-            'jobPostingCredits',
-            'role',
-            'plan',
-            'planExpiresAt',
-            'welcomeCreditsGranted',
-            'isVerifiedCompany'
-          ])
-        );
-      allow delete: if isAdmin();
+      allow read: if true;
+      allow create: if isOwner(userId) &&
+                    doesNotContainSensitivePII(request.resource.data) &&
+                    (!('isVerifiedCompany' in request.resource.data) || request.resource.data.isVerifiedCompany == false);
+      allow update: if isAdmin() || (
+                    isOwner(userId) &&
+                    doesNotContainSensitivePII(request.resource.data) &&
+                    !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isVerifiedCompany', 'role', 'credits'])
+                  );
+      allow delete: if isOwner(userId) || isAdmin();
     }
 
-    // PRIVATE PROFILES COLLECTION (LGPD Fiscal & Personal Data: CPF, CNPJ, Fiscal Address, Private Phone)
+    // =========================================================================
+    // PERFIS PRIVADOS — DADOS SENSÍVEIS LGPD (AUD-03)
+    // Contém: cpf, cnpj, document, fiscalAddress, privatePhone, birthDate
+    // =========================================================================
     match /private_profiles/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow create, update: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow delete: if isAdmin() || isOwner(userId);
-    }
-
-    // DOCUMENTS COLLECTION (Normalized CPF/CNPJ Registry & Welcome Bonus Anti-Duplication)
-    match /documents/{docId} {
-      allow get: if true;
-      allow list: if isAdmin();
-      allow create: if isValidId(docId)
-        && ((isSignedIn() && incoming().uid == request.auth.uid) || isDirectCloudUid(incoming().uid));
-      allow update: if isValidId(docId)
-        && ((isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.uid))
-        && incoming().uid == resource.data.uid;
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid) || isDirectCloudUid(resource.data.uid);
-    }
-
-    // DOCUMENT REGISTRY COLLECTION (CPF / CNPJ UNIQUENESS)
-    match /document_registry/{docId} {
-      allow get: if true;
-      allow list: if isAdmin();
-      allow create: if isValidId(docId)
-        && ((isSignedIn() && incoming().uid == request.auth.uid) || isDirectCloudUid(incoming().uid))
-        && incoming().documentType in ['CPF', 'CNPJ'];
-      allow update: if isValidId(docId)
-        && ((isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.uid))
-        && incoming().uid == resource.data.uid;
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid) || isDirectCloudUid(resource.data.uid);
-    }
-
-    // GENERATED RESUMES COLLECTION
-    match /generated_resumes/{resumeId} {
-      allow get: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
-      allow list: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
-      allow create: if isValidId(resumeId)
-        && ((isSignedIn() && incoming().userId == request.auth.uid) || isDirectCloudUid(incoming().userId));
-      allow update, delete: if isAdmin();
-    }
-
-    // JOBS COLLECTION
-    match /jobs/{jobId} {
-      allow get: if true;
-      allow list: if true;
-
-      allow create: if isValidId(jobId)
-        && ((isSignedIn() && incoming().companyId == request.auth.uid) || isDirectCloudUid(incoming().companyId))
-        && incoming().title is string && incoming().title.size() <= 150
-        && (isAdmin() || incoming().status in ['active', 'paused']);
-
-      allow update: if (isSignedIn() && (resource.data.companyId == request.auth.uid || isAdmin()))
-        || isDirectCloudUid(resource.data.companyId);
-
-      allow delete: if (isSignedIn() && (resource.data.companyId == request.auth.uid || isAdmin()))
-        || isDirectCloudUid(resource.data.companyId);
-    }
-
-    // APPLICATIONS COLLECTION (Strict Candidate & Employer Read Isolation)
-    match /applications/{applicationId} {
-      allow get, list: if (isSignedIn() && (
-        resource.data.candidateId == request.auth.uid ||
-        resource.data.companyId == request.auth.uid ||
-        resource.data.get('employerId', '') == request.auth.uid ||
-        isAdmin()
-      )) || isDirectCloudUid(resource.data.candidateId) || isDirectCloudUid(resource.data.companyId);
-
-      allow create: if isValidId(applicationId)
-        && ((isSignedIn() && incoming().candidateId == request.auth.uid) || isDirectCloudUid(incoming().candidateId))
-        && incoming().status == 'Enviado';
-
-      allow update: if (isSignedIn() && (
-        resource.data.companyId == request.auth.uid ||
-        resource.data.get('employerId', '') == request.auth.uid ||
-        isAdmin()
-      )) || isDirectCloudUid(resource.data.companyId);
-
-      allow delete: if (isSignedIn() && (
-        resource.data.candidateId == request.auth.uid ||
-        isAdmin()
-      )) || isDirectCloudUid(resource.data.candidateId);
-    }
-
-    // REPORTS COLLECTION
-    match /reports/{reportId} {
-      allow get, list: if isAdmin();
-
-      allow create: if isValidId(reportId)
-        && ((isSignedIn() && incoming().reporterId == request.auth.uid) || isDirectCloudUid(incoming().reporterId));
-
-      allow update, delete: if isAdmin();
-    }
-
-    // ADMINS COLLECTION
-    match /admins/{adminId} {
-      allow read: if (isSignedIn() && (request.auth.uid == adminId || isAdmin())) || isDirectCloudUid(adminId);
-      allow write: if isAdmin()
-        || (
-          isSignedIn() &&
-          ('email' in request.auth.token) &&
-          request.auth.token.email_verified == true &&
-          request.auth.token.email.lower() == 'bottaraujoalisson@gmail.com'
-        );
-    }
-
-    // CREDIT ORDERS COLLECTION
-    match /credit_orders/{orderId} {
-      allow get: if resource == null || (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
-      allow list: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
-      allow create: if isValidId(orderId)
-        && ((isSignedIn() && incoming().userId == request.auth.uid) || isDirectCloudUid(incoming().userId));
-      allow update: if (isSignedIn() && (
-        (resource.data.userId == request.auth.uid && incoming().userId == existing().userId) ||
-        isAdmin()
-      )) || (isDirectCloudUid(resource.data.userId) && incoming().userId == existing().userId);
+      allow create, update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin();
     }
 
-    // CREDIT TRANSACTIONS COLLECTION
+    // =========================================================================
+    // REGISTRO DE UNICIDADE DE CPF/CNPJ (AUD-05 / AUD-07)
+    // =========================================================================
+    match /documents/{docId} {
+      allow get: if isAuthenticated();
+      allow list: if false; // Impede enumeração de CPFs/CNPJs
+      allow create: if isAuthenticated() &&
+                    !exists(/databases/$(database)/documents/documents/$(docId)) &&
+                    (request.resource.data.userId == request.auth.uid || request.resource.data.uid == request.auth.uid);
+      allow update, delete: if false;
+    }
+
+    match /document_registry/{docId} {
+      allow get: if isAuthenticated();
+      allow list: if false;
+      allow write: if false; // Escrita realizada exclusivamente pelo backend server.ts
+    }
+
+    // =========================================================================
+    // VAGAS DE EMPREGO (AUD-05)
+    // =========================================================================
+    match /jobs/{jobId} {
+      allow read: if true;
+      allow create: if isAdmin() || (
+                    isVerifiedCompanyUser() &&
+                    request.resource.data.companyId == request.auth.uid &&
+                    (!('isHighlighted' in request.resource.data) || request.resource.data.isHighlighted == false)
+                  );
+      allow update: if isAdmin() || (
+                    isAuthenticated() &&
+                    resource.data.companyId == request.auth.uid &&
+                    !request.resource.data.diff(resource.data).affectedKeys().hasAny(['companyId', 'isHighlighted', 'highlightedUntil'])
+                  );
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.companyId == request.auth.uid);
+    }
+
+    // =========================================================================
+    // CANDIDATURAS E MATCH (AUD-05 / AUD-13)
+    // =========================================================================
+    match /applications/{applicationId} {
+      allow get, list: if isAuthenticated() && (
+        resource.data.candidateId == request.auth.uid ||
+        resource.data.employerId == request.auth.uid ||
+        resource.data.companyId == request.auth.uid ||
+        isAdmin()
+      );
+      allow create: if isAuthenticated() &&
+                    request.resource.data.candidateId == request.auth.uid;
+      allow update: if isAuthenticated() && (
+        resource.data.employerId == request.auth.uid ||
+        resource.data.companyId == request.auth.uid ||
+        isAdmin()
+      ) && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        'candidateId', 'jobId', 'matchScore', 'matchBreakdown'
+      ]);
+      allow delete: if isAuthenticated() && (resource.data.candidateId == request.auth.uid || isAdmin());
+    }
+
+    // =========================================================================
+    // CURRÍCULOS GERADOS POR IA (AUD-05)
+    // =========================================================================
+    match /generated_resumes/{resumeId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // =========================================================================
+    // PEDIDOS E TRANSAÇÕES DE CRÉDITOS (AUD-04 / AUD-09 / AUD-10)
+    // =========================================================================
+    match /credit_orders/{orderId} {
+      allow get, list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if false; // Exclusivamente via Firebase Admin SDK no server.ts
+    }
+
     match /credit_transactions/{txId} {
-      allow get: if resource == null || (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
-      allow list: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || isDirectCloudUid(resource.data.userId);
-      allow create: if isValidId(txId)
-        && ((isSignedIn() && incoming().userId == request.auth.uid) || isDirectCloudUid(incoming().userId));
+      allow get, list: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow write: if false; // Exclusivamente via Firebase Admin SDK no server.ts
+    }
+
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
       allow update, delete: if isAdmin();
+    }
+
+    match /test/{docId} {
+      allow read: if true;
+      allow write: if false;
     }
   }
 }

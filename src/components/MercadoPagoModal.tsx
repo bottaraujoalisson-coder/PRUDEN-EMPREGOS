@@ -744,6 +744,10 @@ export const MercadoPagoModal: React.FC<MercadoPagoModalProps> = ({
                       </div>
                     </div>
 
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[12px] text-blue-900 leading-relaxed">
+                      Você pode pagar no aplicativo do seu banco com tranquilidade. Assim que o banco confirmar o PIX, seus créditos serão liberados automaticamente pelo nosso servidor, mesmo se você fechar esta janela.
+                    </div>
+
                     <button
                       type="button"
                       data-testid="mp-confirm-pix-btn"
