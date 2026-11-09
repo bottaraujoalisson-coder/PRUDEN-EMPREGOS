@@ -25,10 +25,12 @@ function walkFiles(dir, baseDir = dir) {
 
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const fullPath = path.join(dir, entry.name);
+    const relPath = '/' + path.relative(baseDir, fullPath).replace(/\\/g, '/');
+    if (relPath.startsWith('/assets/aistudio')) continue;
+
     if (entry.isDirectory()) {
       Object.assign(results, walkFiles(fullPath, baseDir));
     } else if (entry.isFile()) {
-      const relPath = '/' + path.relative(baseDir, fullPath).replace(/\\/g, '/');
       const buf = fs.readFileSync(fullPath);
       const sha1 = crypto.createHash('sha1').update(buf).digest('hex');
       results[relPath] = { fullPath, sha1, size: buf.length };
@@ -56,6 +58,19 @@ export async function deployDistToNetlify() {
     `/*      /index.html  200`,
   ].join('\n');
   fs.writeFileSync(redirectsPath, redirectsContent, 'utf8');
+
+  // Garante que _headers exista dentro de dist/ com os cabeçalhos de segurança (AUD-18)
+  const headersPath = path.join(DIST_DIR, '_headers');
+  const headersContent = [
+    `/*`,
+    `  X-Frame-Options: DENY`,
+    `  X-Content-Type-Options: nosniff`,
+    `  Referrer-Policy: strict-origin-when-cross-origin`,
+    `  Permissions-Policy: camera=(), microphone=(), geolocation=(self)`,
+    `  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`,
+    `  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://apis.google.com https://sdk.mercadopago.com https://www.google.com https://www.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://api.mercadopago.com https://brasilapi.com.br https://viacep.com.br https://*.run.app; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-src https://*.firebaseapp.com https://accounts.google.com https://www.mercadopago.com.br https://www.google.com;`,
+  ].join('\n');
+  fs.writeFileSync(headersPath, headersContent, 'utf8');
 
   const filesMap = walkFiles(DIST_DIR);
   const fileDigests = {};

@@ -19,5 +19,24 @@ export function formatSalaryBRL(value?: string | number | null): string {
       currency: 'BRL',
     }).format(normalizedNumeric);
   }
+
+  // Suporte a valores como "2200 + comissão" ou "R$ 2200 + comissão"
+  const suffixMatch = str.match(/^(?:R\$\s*)?([\d.,]+)\s*(\+.*)$/i);
+  if (suffixMatch) {
+    const numPart = suffixMatch[1];
+    const suffix = suffixMatch[2].trim();
+    const cleanNum =
+      numPart.includes(',') && numPart.includes('.')
+        ? Number(numPart.replace(/\./g, '').replace(',', '.'))
+        : Number(numPart.replace(',', '.'));
+    if (!isNaN(cleanNum) && cleanNum > 0) {
+      const formattedNum = new Intl.NumberFormat('pt-BR', {
+        style: 'currency',
+        currency: 'BRL',
+      }).format(cleanNum);
+      return `${formattedNum} ${suffix}`;
+    }
+  }
+
   return str.startsWith('R$') ? str : `R$ ${str}`;
 }
