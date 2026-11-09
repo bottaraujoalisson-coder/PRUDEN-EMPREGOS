@@ -64,10 +64,15 @@ export default function App() {
   const isAutostartCandidate =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('autostart') === '1';
+  const isAutostartCompany =
+    typeof window !== 'undefined' &&
+    (new URLSearchParams(window.location.search).get('autostart') === 'company' ||
+      new URLSearchParams(window.location.search).get('autostart') === '2');
 
   const getInitialViewFromUrl = (): 'home' | 'candidate' | 'company' | 'admin' | 'plans' => {
     if (typeof window === 'undefined') return 'home';
     if (isAutostartCandidate) return 'candidate';
+    if (isAutostartCompany) return 'company';
     const path = window.location.pathname.toLowerCase();
     if (path === '/planos' || path === '/creditos') return 'plans';
     if (path === '/candidato' || path === '/painel/candidato') return 'candidate';
@@ -98,6 +103,23 @@ export default function App() {
           savedJobIds: [],
           profileCompleteness: 25,
           credits: INITIAL_WELCOME_CREDITS,
+        }
+      : isAutostartCompany
+      ? {
+          uid: 'comp-preview-uid',
+          name: 'TechPrudente Inovações Ltda',
+          companyName: 'TechPrudente Inovações Ltda',
+          email: 'rh@techprudente.com.br',
+          type: 'company',
+          documentType: 'CNPJ',
+          documentNumber: '12.345.678/0001-90',
+          cnpj: '12.345.678/0001-90',
+          city: 'Presidente Prudente, SP',
+          skills: [],
+          savedJobIds: [],
+          profileCompleteness: 100,
+          credits: 50,
+          planId: 'company_pro',
         }
       : null
   );
@@ -418,7 +440,7 @@ export default function App() {
         } catch (err) {
           console.error('Error fetching user profile:', err);
         }
-      } else if (!isAutostartCandidate) {
+      } else if (!isAutostartCandidate && !isAutostartCompany) {
         const storedUid = getActiveSessionUid();
         if (storedUid) {
           try {
